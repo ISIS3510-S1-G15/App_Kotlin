@@ -11,6 +11,17 @@ data class Profile(
     val foodsToAvoid: List<String>
 )
 
+val emptyProfile = Profile(
+    name = "",
+    frequency = "",
+    budget = "",
+    dietaryRestrictions = emptyList(),
+    cuisinePreferences = emptyList(),
+    usualMealTimes = emptyList(),
+    topPriorities = emptyList(),
+    foodsToAvoid = emptyList()
+)
+
 val mockProfile = Profile(
     name = "Kevin",
     frequency = "Once a week",

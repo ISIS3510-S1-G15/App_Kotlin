@@ -1,5 +1,6 @@
 package com.uniandes.campuseats.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,7 +32,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,6 +44,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,6 +54,8 @@ import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.restaurants
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private val Cream = Color(0xFFFBF5EE)
 private val Brown = Color(0xFF1A1208)
@@ -72,194 +79,259 @@ fun HomeView(
     onOpenProfile: () -> Unit,
     profile: Profile,
     crowding: Map<String, List<Int>>,
+    savedIds: Set<String>,
     modifier: Modifier = Modifier
 ) {
     var search by remember { mutableStateOf("") }
     var activeCategory by remember { mutableStateOf("All") }
+    var filters by remember { mutableStateOf(HomeFilters()) }
+    var showFilters by remember { mutableStateOf(false) }
 
-    val filtered = remember(search, activeCategory) {
-        restaurants.filter { restaurant ->
-            val matchCategory =
-                activeCategory == "All" || restaurant.category == activeCategory
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    var listOffsetPx by remember { mutableIntStateOf(0) }
 
-            val normalizedSearch = search.lowercase()
-            val matchSearch =
-                restaurant.name.lowercase().contains(normalizedSearch) ||
-                        restaurant.location.lowercase().contains(normalizedSearch)
+    fun matches(restaurant: Restaurant, f: HomeFilters): Boolean {
+        val matchCategory =
+            activeCategory == "All" || restaurant.category == activeCategory
 
-            matchCategory && matchSearch
-        }
+        val normalizedSearch = search.lowercase()
+        val matchSearch =
+            restaurant.name.lowercase().contains(normalizedSearch) ||
+                    restaurant.location.lowercase().contains(normalizedSearch)
+
+        val matchFilters = (!f.openNow || restaurant.isOpen) &&
+                (!f.savedOnly || restaurant.id in savedIds) &&
+                (f.prices.isEmpty() || restaurant.price in f.prices) &&
+                restaurant.rating >= f.minRating
+
+        return matchCategory && matchSearch && matchFilters
     }
+
+    val filtered = restaurants.filter { matches(it, filters) }
 
     val featured = restaurants.firstOrNull()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Cream)
-            .verticalScroll(rememberScrollState())
-    ) {
+    BackHandler(enabled = showFilters) { showFilters = false }
+
+    Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .fillMaxSize()
+                .background(Cream)
+                .verticalScroll(scrollState)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
-                Column {
-                    Text(
-                        text = "UNIVERSIDAD DE LOS ANDES",
-                        color = Orange,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.7.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    Text(
-                        text = profile.name
-                            .takeIf { it.isNotBlank() }
-                            ?.let { "Hola, $it 👋" }
-                            ?: "Campus Eats",
-                        color = Brown,
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Black,
-                        lineHeight = 30.sp
-                    )
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clickable(onClick = onOpenProfile),
-                    shape = CircleShape,
-                    color = Brown
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        val name = profile.name.takeIf { it.isNotBlank() }
+                    Column {
+                        Text(
+                            text = "UNIVERSIDAD DE LOS ANDES",
+                            color = Orange,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.7.sp
+                        )
 
-                        if (name != null) {
-                            Text(
-                                text = name
-                                    .take(2)
-                                    .uppercase(),
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Profile",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Text(
+                            text = profile.name
+                                .takeIf { it.isNotBlank() }
+                                ?.let { "Hola, $it 👋" }
+                                ?: "Campus Eats",
+                            color = Brown,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Black,
+                            lineHeight = 30.sp
+                        )
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable(onClick = onOpenProfile),
+                        shape = CircleShape,
+                        color = Brown
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            val name = profile.name.takeIf { it.isNotBlank() }
+
+                            if (name != null) {
+                                Text(
+                                    text = name
+                                        .take(2)
+                                        .uppercase(),
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = "Profile",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if (search.isBlank() && activeCategory == "All" && featured != null) {
+            if (search.isBlank() && activeCategory == "All" && featured != null) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Today's Pick",
+                            color = Brown,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "See all",
+                            color = Orange,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            // Lleva a la lista completa: limpia filtros y baja hasta las categorías
+                            modifier = Modifier.clickable {
+                                activeCategory = "All"
+                                filters = HomeFilters()
+                                scope.launch { scrollState.animateScrollTo(listOffsetPx) }
+                            }
+                        )
+                    }
+
+                    FeaturedRestaurant(
+                        restaurant = featured,
+                        onClick = { onSelect(featured) }
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { listOffsetPx = it.positionInParent().y.roundToInt() }
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Categories.forEach { category ->
+                    CategoryChip(
+                        text = category,
+                        selected = activeCategory == category,
+                        onClick = { activeCategory = category }
+                    )
+                }
+            }
+
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Today's Pick",
+                        text = "${filtered.size} ${
+                            if (activeCategory == "All") "Spots" else activeCategory
+                        } Near You",
                         color = Brown,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "See all",
-                        color = Orange,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+
+                    val activeFilters = filters.activeCount
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (activeFilters > 0) Orange else Color.Transparent)
+                            .clickable { showFilters = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val tint = if (activeFilters > 0) Color.White else Orange
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = "Filter",
+                            tint = tint,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (activeFilters > 0) "Filter · $activeFilters" else "Filter",
+                            color = tint,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
 
-                FeaturedRestaurant(
-                    restaurant = featured,
-                    onClick = { onSelect(featured) }
-                )
-            }
-        }
+                if (filtered.isEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = "No spots match your filters", color = Brown, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Clear filters",
+                            color = Orange,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .clickable {
+                                    filters = HomeFilters()
+                                    activeCategory = "All"
+                                }
+                        )
+                    }
+                }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-            ,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Categories.forEach { category ->
-                CategoryChip(
-                    text = category,
-                    selected = activeCategory == category,
-                    onClick = { activeCategory = category }
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "${filtered.size} ${
-                        if (activeCategory == "All") "Spots" else activeCategory
-                    } Near You",
-                    color = Brown,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FilterList,
-                        contentDescription = "Filter",
-                        tint = Orange,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "Filter",
-                        color = Orange,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
+                filtered.forEach { restaurant ->
+                    RestaurantCard(
+                        restaurant = restaurant,
+                        isSaved = restaurant.id in savedIds,
+                        onSelect = onSelect,
+                        crowdingReports = crowding[restaurant.id].orEmpty()
                     )
                 }
             }
+        }
 
-            filtered.forEach { restaurant ->
-                RestaurantCard(
-                    restaurant = restaurant,
-                    onSelect = onSelect,
-                    crowdingReports = crowding[restaurant.id].orEmpty()
-                )
-            }
+        if (showFilters) {
+            FilterSheet(
+                initial = filters,
+                countFor = { draft -> restaurants.count { matches(it, draft) } },
+                onApply = {
+                    filters = it
+                    showFilters = false
+                },
+                onDismiss = { showFilters = false }
+            )
         }
     }
 }
@@ -418,18 +490,9 @@ private fun StatusPill(
 }
 
 @Composable
-fun CrowdingBadge(reports: List<Int>, size: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "👥 ${reports.size}",
-        fontSize = if (size == "sm") 10.sp else 12.sp,
-        color = Color.Gray,
-        modifier = modifier.padding(horizontal = 4.dp)
-    )
-}
-
-@Composable
 private fun RestaurantCard(
     restaurant: Restaurant,
+    isSaved: Boolean,
     onSelect: (Restaurant) -> Unit,
     crowdingReports: List<Int>
 ) {
@@ -454,7 +517,7 @@ private fun RestaurantCard(
                 contentScale = ContentScale.Crop
             )
 
-            if (restaurant.saved) {
+            if (isSaved) {
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)

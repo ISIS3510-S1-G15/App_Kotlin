@@ -104,10 +104,11 @@ private fun PathIcon(
 @Composable
 fun SavedView(
     onSelect: (Restaurant) -> Unit,
-    crowding: Map<String, List<Int>>
+    crowding: Map<String, List<Int>>,
+    savedIds: Set<String>
 ) {
     var dietaryFilters by remember { mutableStateOf(listOf<String>()) }
-    val saved = restaurants.filter { it.saved }
+    val saved = restaurants.filter { it.id in savedIds }
 
     val toggleDiet = { d: String ->
         dietaryFilters = if (dietaryFilters.contains(d)) {
@@ -250,7 +251,7 @@ fun SavedView(
                                     .background(Green)
                             )
                             Text(
-                                text = r.hours.split('-')[1].trim(),
+                                text = r.hours.split('–', '-').last().trim(),
                                 fontSize = 11.sp,
                                 color = Color.White.copy(alpha = 0.6f)
                             )
@@ -340,7 +341,7 @@ fun SavedView(
                     .padding(bottom = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                restaurants.filter { !it.saved }.take(4).forEach { r ->
+                restaurants.filter { it.id !in savedIds }.take(4).forEach { r ->
                     val shape = RoundedCornerShape(16.dp)
                     Column(
                         modifier = Modifier
