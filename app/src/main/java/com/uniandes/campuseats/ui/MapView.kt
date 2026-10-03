@@ -6,7 +6,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,38 +27,31 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.location.Location
+import androidx.compose.ui.viewinterop.AndroidView
+import org.osmdroid.config.Configuration
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView as OsmMapView
+import org.osmdroid.views.overlay.Marker
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.locationLabel
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.restaurants
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
-import kotlin.math.min
-import kotlin.math.roundToInt
 
 private val Cream = Color(0xFFFBF5EE)
 private val Ink = Color(0xFF1A1208)
@@ -174,178 +166,79 @@ fun MapView(
         }
 
         val mapShape = RoundedCornerShape(24.dp)
-        BoxWithConstraints(
+        Box(
             modifier = Modifier
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .height(300.dp)
                 .shadow(8.dp, mapShape)
                 .clip(mapShape)
+                .border(1.dp, CardBorder, mapShape)
         ) {
-            val boxWidthPx = constraints.maxWidth
-            val boxHeightPx = constraints.maxHeight
-            val textMeasurer = rememberTextMeasurer()
-            val labelFontSize = with(LocalDensity.current) { 6f.toSp() }
-            val labelStyle = TextStyle(
-                fontSize = labelFontSize,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF5A7A9A),
-                fontFamily = FontFamily.SansSerif
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    Configuration.getInstance().userAgentValue = context.packageName
+
+                    OsmMapView(context).apply {
+                        setMultiTouchControls(true)
+                        controller.setZoom(17.0)
+                        controller.setCenter(GeoPoint(4.6025, -74.0655))
+                    }
+                },
+                update = { mapView ->
+                    mapView.overlays.clear()
+
+                    // 1. Dibujamos los pines
+                    val size = 50 // Tamaño en pixeles
+                    val openBitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+                    val closedBitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+
+                    val openCanvas = android.graphics.Canvas(openBitmap)
+                    val closedCanvas = android.graphics.Canvas(closedBitmap)
+                    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+                    // Pin Abierto
+                    paint.color = android.graphics.Color.WHITE
+                    openCanvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+                    paint.color = Green.toArgb() // Usamos el verde de tu paleta
+                    openCanvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 6f, paint)
+
+                    // Pin Cerrado
+                    paint.color = android.graphics.Color.WHITE
+                    closedCanvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+                    paint.color = android.graphics.Color.parseColor("#D32F2F") // Un rojo profesional
+                    closedCanvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 6f, paint)
+
+                    val openIcon = android.graphics.drawable.BitmapDrawable(mapView.context.resources, openBitmap)
+                    val closedIcon = android.graphics.drawable.BitmapDrawable(mapView.context.resources, closedBitmap)
+
+                    // 2. Asignamos los íconos a los restaurantes
+                    visible.forEach { r ->
+                        val isSelected = selected?.id == r.id
+                        val geoPoint = GeoPoint(r.latitude, r.longitude)
+
+                        val marker = Marker(mapView)
+                        marker.position = geoPoint
+                        marker.title = r.name
+                        marker.snippet = "${r.waitTime} wait • ${if (r.isOpen) "Open" else "Closed"}"
+
+                        marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        marker.icon = if (r.isOpen) openIcon else closedIcon
+
+                        if (isSelected) marker.showInfoWindow()
+
+                        marker.setOnMarkerClickListener { _, _ ->
+                            selected = if (isSelected) null else r
+                            true
+                        }
+
+                        mapView.overlays.add(marker)
+                    }
+
+                    mapView.invalidate()
+                }
             )
-
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = min(size.width / 350f, size.height / 300f)
-                val dx = (size.width - 350f * s) / 2f
-                val dy = (size.height - 300f * s) / 2f
-                translate(dx, dy) {
-                    scale(s, s, pivot = Offset.Zero) {
-                        drawRect(Color(0xFFD4E8C2), Offset.Zero, Size(350f, 300f))
-
-                        val pathColor = Color(0xFFC5D9B2)
-                        val p1 = Path().apply {
-                            moveTo(0f, 150f)
-                            quadraticBezierTo(100f, 140f, 175f, 150f)
-                            quadraticBezierTo(250f, 160f, 350f, 145f)
-                        }
-                        drawPath(p1, pathColor, style = Stroke(width = 18f))
-                        val p2 = Path().apply {
-                            moveTo(175f, 0f)
-                            quadraticBezierTo(180f, 80f, 175f, 150f)
-                            quadraticBezierTo(170f, 220f, 175f, 300f)
-                        }
-                        drawPath(p2, pathColor, style = Stroke(width = 14f))
-                        val p3 = Path().apply {
-                            moveTo(0f, 80f)
-                            quadraticBezierTo(80f, 85f, 175f, 80f)
-                            quadraticBezierTo(260f, 75f, 350f, 82f)
-                        }
-                        drawPath(p3, pathColor, style = Stroke(width = 10f))
-
-                        val buildingColor = Color(0xFFA8C4E0)
-                        val buildings = listOf(
-                            floatArrayOf(30f, 20f, 60f, 45f),
-                            floatArrayOf(130f, 30f, 55f, 40f),
-                            floatArrayOf(230f, 15f, 70f, 50f),
-                            floatArrayOf(40f, 185f, 50f, 55f),
-                            floatArrayOf(135f, 200f, 65f, 45f),
-                            floatArrayOf(240f, 175f, 75f, 60f)
-                        )
-                        buildings.forEach { b ->
-                            drawRoundRect(
-                                color = buildingColor,
-                                topLeft = Offset(b[0], b[1]),
-                                size = Size(b[2], b[3]),
-                                cornerRadius = CornerRadius(4f, 4f),
-                                alpha = 0.8f
-                            )
-                        }
-
-                        drawOval(
-                            color = Color(0xFF7AB8D4),
-                            topLeft = Offset(157f, 138f),
-                            size = Size(36f, 24f),
-                            alpha = 0.6f
-                        )
-
-                        val labels = listOf(
-                            Triple("WEST", 60f, 47f),
-                            Triple("UNION", 157f, 52f),
-                            Triple("NORTH", 265f, 43f),
-                            Triple("ATHLETICS", 65f, 215f),
-                            Triple("EAST HALL", 167f, 225f),
-                            Triple("FOOD COURT", 277f, 207f)
-                        )
-                        labels.forEach { (text, x, y) ->
-                            val layoutResult = textMeasurer.measure(text, labelStyle)
-                            drawText(
-                                layoutResult,
-                                topLeft = Offset(
-                                    x - layoutResult.size.width / 2f,
-                                    y - layoutResult.firstBaseline
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            visible.forEach { r ->
-                val isSelected = selected?.id == r.id
-                val px = boxWidthPx * r.mapX.toFloat() / 100f
-                val py = boxHeightPx * r.mapY.toFloat() / 100f
-                Column(
-                    modifier = Modifier
-                        .layout { measurable, constraints ->
-                            val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
-                            layout(placeable.width, placeable.height) {
-                                placeable.place(
-                                    (px - placeable.width / 2f).roundToInt(),
-                                    (py - placeable.height).roundToInt()
-                                )
-                            }
-                        }
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null
-                        ) { selected = if (isSelected) null else r },
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    if (isSelected) {
-                        val tipShape = RoundedCornerShape(12.dp)
-                        Column(
-                            modifier = Modifier
-                                .padding(bottom = 4.dp)
-                                .shadow(6.dp, tipShape)
-                                .clip(tipShape)
-                                .background(Color.White)
-                                .border(1.dp, CardBorder, tipShape)
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = r.name,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Ink,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                            Text(
-                                text = r.waitTime,
-                                fontSize = 9.sp,
-                                color = Muted,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .graphicsLayer {
-                                val sc = if (isSelected) 1.25f else 1f
-                                scaleX = sc
-                                scaleY = sc
-                            }
-                            .size(32.dp)
-                            .shadow(6.dp, CircleShape)
-                            .clip(CircleShape)
-                            .background(
-                                when {
-                                    isSelected -> Accent
-                                    r.isOpen -> Ink
-                                    else -> Muted
-                                }
-                            )
-                            .border(2.dp, Color.White, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = categoryEmoji(r.category),
-                            color = Color.White,
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-            }
 
             Column(
                 modifier = Modifier
@@ -364,7 +257,7 @@ fun MapView(
                         modifier = Modifier
                             .size(12.dp)
                             .clip(CircleShape)
-                            .background(Ink)
+                            .background(Green)
                     )
                     Text(text = "Open", fontSize = 9.sp, color = Muted)
                 }
@@ -376,7 +269,7 @@ fun MapView(
                         modifier = Modifier
                             .size(12.dp)
                             .clip(CircleShape)
-                            .background(Muted)
+                            .background(Color(0xFFD32F2F))
                     )
                     Text(text = "Closed", fontSize = 9.sp, color = Muted)
                 }
