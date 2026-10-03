@@ -182,6 +182,7 @@ fun CampusEatsMainScreen() {
                     crowdingReports = crowding[restaurant.id].orEmpty(),
                     isSaved = restaurant.id in savedIds,
                     distanceMeters = userLocation.location?.let { distanceMeters(it, restaurant) },
+                    userLocation = userLocation.location,
                     onToggleSave = { toggleSaved(restaurant.id) },
                     onBack = ::closeAll,
                     onWriteReview = { overlayStack.add(Overlay.WriteReview) },

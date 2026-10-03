@@ -50,6 +50,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.location.Location
+import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.config.Configuration
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
@@ -83,6 +86,7 @@ fun DetailView(
     crowdingReports: List<Int>,
     isSaved: Boolean,
     distanceMeters: Float?,
+    userLocation: Location?,
     onToggleSave: () -> Unit,
     onBack: () -> Unit,
     onWriteReview: () -> Unit,
@@ -257,19 +261,69 @@ fun DetailView(
 
                             MapView(context).apply {
                                 setMultiTouchControls(true)
-                                controller.setZoom(18.0)
-
-                                val geoPoint = GeoPoint(r.latitude, r.longitude)
-                                controller.setCenter(geoPoint)
-
-                                val marker = Marker(this)
-                                marker.position = geoPoint
-                                marker.title = r.name
-                                marker.snippet = r.location
-                                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-
-                                overlays.add(marker)
                             }
+                        },
+                        update = { mapView ->
+                            mapView.overlays.clear()
+
+                            val restPoint = GeoPoint(r.latitude, r.longitude)
+
+                            // Pin del restaurante
+                            val restMarker = Marker(mapView)
+                            restMarker.position = restPoint
+                            restMarker.title = r.name
+                            restMarker.snippet = r.location
+                            restMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            mapView.overlays.add(restMarker)
+
+                            // Si el GPS detecta al usuario dibujamos su punto y la ruta
+                            if (userLocation != null) {
+                                val userPoint = GeoPoint(userLocation.latitude, userLocation.longitude)
+
+                                // Linea punteada de ruta
+                                val routeLine = Polyline(mapView)
+                                routeLine.addPoint(userPoint)
+                                routeLine.addPoint(restPoint)
+                                routeLine.outlinePaint.color = android.graphics.Color.parseColor("#3B82F6")
+                                routeLine.outlinePaint.strokeWidth = 8f
+                                routeLine.outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 20f), 0f)
+                                mapView.overlays.add(routeLine)
+
+                                // Pin del usuario
+                                val size = 40
+                                val userBitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+                                val canvas = android.graphics.Canvas(userBitmap)
+                                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+                                paint.color = android.graphics.Color.WHITE
+                                canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+                                paint.color = android.graphics.Color.parseColor("#3B82F6") // Azul
+                                canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 6f, paint)
+
+                                val userIcon = android.graphics.drawable.BitmapDrawable(mapView.context.resources, userBitmap)
+
+                                val userMarker = Marker(mapView)
+                                userMarker.position = userPoint
+                                userMarker.title = "Tú estás aquí"
+                                userMarker.icon = userIcon
+                                userMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                mapView.overlays.add(userMarker)
+
+                                // Calcular el area que abarca al usuario y al restaurante
+                                val boundingBox = BoundingBox.fromGeoPoints(listOf(userPoint, restPoint))
+
+                                // Usamos post{} para asegurarnos de que el mapa ya se dibujo en pantalla
+                                mapView.post {
+                                    // increaseByScale(1.4f) añade márgenes para que los pines no queden pegados a los bordes
+                                    mapView.zoomToBoundingBox(boundingBox.increaseByScale(1.4f), true)
+                                }
+                            } else {
+                                // Si el GPS esta apagado o no hay permisos, solo centramos el restaurante
+                                mapView.controller.setZoom(18.0)
+                                mapView.controller.setCenter(restPoint)
+                            }
+
+                            mapView.invalidate()
                         }
                     )
                 }
