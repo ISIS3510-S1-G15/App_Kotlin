@@ -49,12 +49,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
+import androidx.compose.ui.viewinterop.AndroidView
+import org.osmdroid.config.Configuration
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
@@ -232,29 +231,46 @@ fun DetailView(
         }
 
         Column(modifier = Modifier.offset(y = (-24).dp)) {
-            // Google Map. De momento solo muestra un recuadro gris porque falta la llave de la API
-            val restaurantLocation = LatLng(r.latitude, r.longitude)
-            val cameraPositionState = rememberCameraPositionState {
-                position = CameraPosition.fromLatLngZoom(restaurantLocation, 17f)
-            }
-
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 12.dp)
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, Outline, RoundedCornerShape(16.dp))
+            // OpenStreetMap usando Osmdroid
+            Column(
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp)
             ) {
-                GoogleMap(
-                    modifier = Modifier.fillMaxSize(),
-                    cameraPositionState = cameraPositionState
+                Text(
+                    text = "Location",
+                    color = Ink,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = OutfitFontFamily,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, Outline, RoundedCornerShape(16.dp))
                 ) {
-                    Marker(
-                        state = MarkerState(position = restaurantLocation),
-                        title = r.name,
-                        snippet = r.location
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { context ->
+                            Configuration.getInstance().userAgentValue = context.packageName
+
+                            MapView(context).apply {
+                                setMultiTouchControls(true)
+                                controller.setZoom(18.0)
+
+                                val geoPoint = GeoPoint(r.latitude, r.longitude)
+                                controller.setCenter(geoPoint)
+
+                                val marker = Marker(this)
+                                marker.position = geoPoint
+                                marker.title = r.name
+                                marker.snippet = r.location
+                                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+
+                                overlays.add(marker)
+                            }
+                        }
                     )
                 }
             }
