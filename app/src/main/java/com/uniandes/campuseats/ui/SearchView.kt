@@ -73,7 +73,7 @@ private val Highlight = Color(0x66F4A735)
 
 private val Recent = listOf("Starbucks", "Kai Sushi", "Cosechas")
 private val PopularTags = listOf(
-    "Vegan options", "Halal", "Open late", "Quick pickup", "Coffee"
+    "Open", "Closed", "Vegan options", "Halal", "Open late", "Quick pickup", "Coffee"
 )
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -98,10 +98,13 @@ fun SearchView(
         if (query.trim().isNotEmpty()) {
             val q = query.lowercase()
             restaurants.filter { restaurant ->
+                val matchesStatus = (q == "open" && restaurant.isOpen) ||   //Filtra si esta abierto o cerrado
+                                    (q == "closed" && !restaurant.isOpen)
+                matchesStatus ||
                 restaurant.name.lowercase().contains(q) ||
-                        restaurant.category.lowercase().contains(q) ||
-                        restaurant.location.lowercase().contains(q) ||
-                        restaurant.tags.any { it.lowercase().contains(q) }
+                restaurant.category.lowercase().contains(q) ||
+                restaurant.location.lowercase().contains(q) ||
+                restaurant.tags.any { it.lowercase().contains(q) }
             }
         } else {
             emptyList()

@@ -2,13 +2,13 @@ package com.uniandes.campuseats.data
 
 import java.util.Calendar
 
-private val HoursRegex = Regex("""(\d{1,2}):(\d{2})\s*(AM|PM)""", RegexOption.IGNORE_CASE)
+private val HoursRegex = Regex("""(\d{1,2}):(\d{2})\s*(A\.?M\.?|P\.?M\.?)""", RegexOption.IGNORE_CASE)
 
 /** Convierte "6:30 AM" en minutos desde medianoche. */
 private fun toMinutes(match: MatchResult): Int {
     val (h, m, ampm) = match.destructured
     var hour = h.toInt() % 12
-    if (ampm.equals("PM", ignoreCase = true)) hour += 12
+    if (ampm.replace(".", "").equals("PM", ignoreCase = true)) hour += 12
     return hour * 60 + m.toInt()
 }
 
