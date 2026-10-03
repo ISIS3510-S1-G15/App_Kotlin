@@ -53,7 +53,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
+import android.location.Location
 import coil.compose.AsyncImage
+import com.uniandes.campuseats.sensor.distanceMeters
+import com.uniandes.campuseats.sensor.formatDistance
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.restaurants
 
@@ -78,6 +81,7 @@ private val PopularTags = listOf(
 fun SearchView(
     onSelect: (Restaurant) -> Unit,
     crowding: Map<String, List<Int>>,
+    userLocation: Location?,
     modifier: Modifier = Modifier
 ) {
     var query by remember { mutableStateOf("") }
@@ -224,7 +228,8 @@ fun SearchView(
                             restaurant = restaurant,
                             onSelect = onSelect,
                             query = query,
-                            crowdingReports = crowding[restaurant.id].orEmpty()
+                            crowdingReports = crowding[restaurant.id].orEmpty(),
+                            userLocation = userLocation
                         )
                     }
                 }
@@ -254,7 +259,8 @@ fun SearchView(
                                 restaurant = restaurant,
                                 onSelect = onSelect,
                                 query = "",
-                                crowdingReports = crowding[restaurant.id].orEmpty()
+                                crowdingReports = crowding[restaurant.id].orEmpty(),
+                                userLocation = userLocation
                             )
                         }
                     }
@@ -432,7 +438,8 @@ private fun SearchResultRow(
     restaurant: Restaurant,
     onSelect: (Restaurant) -> Unit,
     query: String,
-    crowdingReports: List<Int>
+    crowdingReports: List<Int>,
+    userLocation: Location?
 ) {
     Row(
         modifier = Modifier
@@ -469,13 +476,23 @@ private fun SearchResultRow(
 
             Spacer(modifier = Modifier.height(2.dp))
 
-            HighlightedText(
-                text = restaurant.location,
-                query = query,
-                color = Muted,
-                fontSize = 11.sp,
-                maxLines = 1
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HighlightedText(
+                    text = restaurant.location,
+                    query = query,
+                    color = Muted,
+                    fontSize = 11.sp,
+                    maxLines = 1
+                )
+                if (userLocation != null) {
+                    Text(
+                        text = " · ${formatDistance(distanceMeters(userLocation, restaurant))}",
+                        color = Muted,
+                        fontSize = 11.sp,
+                        maxLines = 1
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(4.dp))
 

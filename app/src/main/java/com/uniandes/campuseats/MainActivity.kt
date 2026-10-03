@@ -19,6 +19,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -33,6 +34,8 @@ import com.uniandes.campuseats.data.AppDataStore
 import com.uniandes.campuseats.data.ProfileStore
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.sensor.distanceMeters
+import com.uniandes.campuseats.sensor.rememberUserLocation
 import com.uniandes.campuseats.ui.CrowdingModal
 import com.uniandes.campuseats.ui.DetailView
 import com.uniandes.campuseats.ui.HomeView
@@ -79,6 +82,12 @@ fun CampusEatsMainScreen() {
     val reviews = remember { mutableStateListOf<Review>().apply { addAll(dataStore.loadReviews()) } }
     val crowding = remember { mutableStateMapOf<String, List<Int>>().apply { putAll(dataStore.loadCrowding()) } }
     var savedIds by remember { mutableStateOf(dataStore.loadSavedIds()) }
+
+    // Sensor GPS: se pide el permiso al terminar el onboarding y se comparte con las pantallas
+    val userLocation = rememberUserLocation()
+    LaunchedEffect(surveyDone) {
+        if (surveyDone && !userLocation.hasPermission) userLocation.requestPermission()
+    }
 
     // Onboarding: encuesta a pantalla completa solo la primera vez
     if (!surveyDone) {
@@ -172,6 +181,7 @@ fun CampusEatsMainScreen() {
                     reviews = restaurantReviews,
                     crowdingReports = crowding[restaurant.id].orEmpty(),
                     isSaved = restaurant.id in savedIds,
+                    distanceMeters = userLocation.location?.let { distanceMeters(it, restaurant) },
                     onToggleSave = { toggleSaved(restaurant.id) },
                     onBack = ::closeAll,
                     onWriteReview = { overlayStack.add(Overlay.WriteReview) },
@@ -212,20 +222,25 @@ fun CampusEatsMainScreen() {
                         onOpenProfile = { selectTab(PROFILE_TAB) },
                         profile = profile,
                         crowding = crowding,
-                        savedIds = savedIds
+                        savedIds = savedIds,
+                        reviews = reviews,
+                        userLocation = userLocation.location
                     )
                     1 -> SearchView(
                         onSelect = requestDetail,
-                        crowding = crowding
+                        crowding = crowding,
+                        userLocation = userLocation.location
                     )
                     2 -> MapView(
                         onSelect = requestDetail,
-                        crowding = crowding
+                        crowding = crowding,
+                        userLocation = userLocation.location
                     )
                     3 -> SavedView(
                         onSelect = requestDetail,
                         crowding = crowding,
-                        savedIds = savedIds
+                        savedIds = savedIds,
+                        userLocation = userLocation.location
                     )
                     PROFILE_TAB -> ProfileView(
                         profile = profile,

@@ -54,6 +54,7 @@ import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.avgCrowding
 import com.uniandes.campuseats.data.getCrowdingLevel
+import com.uniandes.campuseats.sensor.formatDistance
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -76,6 +77,7 @@ fun DetailView(
     reviews: List<Review>,
     crowdingReports: List<Int>,
     isSaved: Boolean,
+    distanceMeters: Float?,
     onToggleSave: () -> Unit,
     onBack: () -> Unit,
     onWriteReview: () -> Unit,
@@ -189,7 +191,11 @@ fun DetailView(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Icon(Icons.Default.LocationOn, null, tint = Orange.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
-                Text(text = r.location, color = Muted, fontSize = 13.sp)
+                Text(
+                    text = if (distanceMeters != null) "${r.location} · ${formatDistance(distanceMeters)}" else r.location,
+                    color = Muted,
+                    fontSize = 13.sp
+                )
             }
 
             Box(

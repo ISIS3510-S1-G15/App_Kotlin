@@ -52,7 +52,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.location.Location
 import coil.compose.AsyncImage
+import com.uniandes.campuseats.sensor.locationLabel
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.restaurants
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
@@ -109,7 +111,8 @@ private fun PathIcon(
 @Composable
 fun MapView(
     onSelect: (Restaurant) -> Unit,
-    crowding: Map<String, List<Int>>
+    crowding: Map<String, List<Int>>,
+    userLocation: Location?
 ) {
     var selected by remember { mutableStateOf<Restaurant?>(null) }
     var filter by remember { mutableStateOf("all") }
@@ -433,7 +436,7 @@ fun MapView(
                             )
                         }
                         Text(
-                            text = sel.location,
+                            text = locationLabel(sel, userLocation),
                             fontSize = 11.sp,
                             color = Muted,
                             modifier = Modifier.padding(top = 2.dp)

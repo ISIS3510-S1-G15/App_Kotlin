@@ -12,7 +12,6 @@ data class Restaurant(
     val location: String,
     val category: String,
     val image: Any, // drawable (Int) o URL (String); AsyncImage acepta ambos
-    val isOpen: Boolean,
     val rating: Double,
     val reviews: Int,
     val price: String,
@@ -23,8 +22,13 @@ data class Restaurant(
     val description: String,
     val mapX: Float, // porcentaje 0-100 del ancho del mapa
     val mapY: Float, // porcentaje 0-100 del alto del mapa
+    val latitude: Double,
+    val longitude: Double,
     val menu: List<MenuSection>
-)
+) {
+    /** Context-aware: abierto o cerrado según la hora actual del teléfono y el horario del lugar. */
+    val isOpen: Boolean get() = isOpenNow(hours)
+}
 
 val restaurants = listOf(
     Restaurant(
@@ -33,7 +37,6 @@ val restaurants = listOf(
         location = "Plazoleta Lleras",
         category = "Café",
         image = R.drawable.starbucks,
-        isOpen = true,
         rating = 4.7,
         reviews = 1204,
         price = "$",
@@ -44,6 +47,8 @@ val restaurants = listOf(
         description = "The campus favorite for specialty coffee, house-made pastries, and a cozy atmosphere perfect for studying or catching up with friends.",
         mapX = 55f,
         mapY = 25f,
+        latitude = 4.6016,
+        longitude = -74.0659,
         menu = listOf(
             MenuSection(
                 "Drinks",
@@ -68,7 +73,6 @@ val restaurants = listOf(
         location = "Calle 20",
         category = "Asian",
         image = R.drawable.sushi,
-        isOpen = true,
         rating = 4.5,
         reviews = 673,
         price = "$$",
@@ -79,6 +83,8 @@ val restaurants = listOf(
         description = "Authentic ramen, pho, and pan-Asian noodle dishes made fresh daily. Student favorite for a warm, satisfying meal between classes.",
         mapX = 70f,
         mapY = 55f,
+        latitude = 4.604,
+        longitude = -74.0655,
         menu = listOf(
             MenuSection(
                 "Ramen",
@@ -102,7 +108,6 @@ val restaurants = listOf(
         location = "Calle del SD",
         category = "Burgers",
         image = R.drawable.la_puerta,
-        isOpen = false,
         rating = 4.1,
         reviews = 528,
         price = "$$",
@@ -113,6 +118,8 @@ val restaurants = listOf(
         description = "Classic American grill serving smash burgers, crinkle fries, and tasty breakfast. Popular post-game spot for the athletics crowd.",
         mapX = 20f,
         mapY = 70f,
+        latitude = 4.6029,
+        longitude = -74.0653,
         menu = listOf(
             MenuSection(
                 "Burgers",
@@ -130,7 +137,6 @@ val restaurants = listOf(
         location = "Edificio ML",
         category = "Smoothies",
         image = "https://images.unsplash.com/photo-1505252585461-04db1eb84625?w=800&h=500&fit=crop&auto=format",
-        isOpen = true,
         rating = 4.4,
         reviews = 287,
         price = "$$",
@@ -141,6 +147,8 @@ val restaurants = listOf(
         description = "Cold-pressed juices, smoothie bowls, and protein shakes designed for active students. Everything is made to order.",
         mapX = 60f,
         mapY = 35f,
+        latitude = 4.6025,
+        longitude = -74.0652,
         menu = listOf(
             MenuSection(
                 "Smoothies",

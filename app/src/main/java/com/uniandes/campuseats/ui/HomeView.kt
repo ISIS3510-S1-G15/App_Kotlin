@@ -54,7 +54,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Profile
+import android.location.Location
 import com.uniandes.campuseats.data.Restaurant
+import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.data.recommend
+import com.uniandes.campuseats.sensor.distanceMeters
+import com.uniandes.campuseats.sensor.formatDistance
 import com.uniandes.campuseats.data.restaurants
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -82,6 +87,8 @@ fun HomeView(
     profile: Profile,
     crowding: Map<String, List<Int>>,
     savedIds: Set<String>,
+    reviews: List<Review>,
+    userLocation: Location?,
     modifier: Modifier = Modifier
 ) {
     var search by remember { mutableStateOf("") }
@@ -110,9 +117,16 @@ fun HomeView(
         return matchCategory && matchSearch && matchFilters
     }
 
+    // Sensor GPS: distancia del usuario a cada restaurante (vacío si no hay ubicación)
+    val distances = userLocation
+        ?.let { loc -> restaurants.associate { it.id to distanceMeters(loc, it) } }
+        .orEmpty()
+
     val filtered = restaurants.filter { matches(it, filters) }
 
-    val featured = restaurants.firstOrNull()
+    // Smart feature: el mejor restaurante para este usuario, ahora mismo
+    val pick = recommend(restaurants, profile, reviews, crowding, distances).firstOrNull()
+    val featured = pick?.restaurant
 
     BackHandler(enabled = showFilters) { showFilters = false }
 
@@ -221,6 +235,8 @@ fun HomeView(
 
                     FeaturedRestaurant(
                         restaurant = featured,
+                        reasons = pick.reasons,
+                        distanceMeters = distances[featured.id],
                         onClick = { onSelect(featured) }
                     )
                 }
@@ -318,7 +334,8 @@ fun HomeView(
                         restaurant = restaurant,
                         isSaved = restaurant.id in savedIds,
                         onSelect = onSelect,
-                        crowdingReports = crowding[restaurant.id].orEmpty()
+                        crowdingReports = crowding[restaurant.id].orEmpty(),
+                        distanceMeters = distances[restaurant.id]
                     )
                 }
             }
@@ -341,12 +358,14 @@ fun HomeView(
 @Composable
 private fun FeaturedRestaurant(
     restaurant: Restaurant,
+    reasons: List<String>,
+    distanceMeters: Float?,
     onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .height(if (reasons.isEmpty()) 200.dp else 224.dp)
             .clip(RoundedCornerShape(24.dp))
             .shadow(10.dp, RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
@@ -431,7 +450,11 @@ private fun FeaturedRestaurant(
                 }
 
                 Text(
-                    text = restaurant.location,
+                    text = if (distanceMeters != null) {
+                        "${restaurant.location} · ${formatDistance(distanceMeters)}"
+                    } else {
+                        restaurant.location
+                    },
                     color = Color.White.copy(alpha = 0.70f),
                     fontSize = 12.sp,
                     maxLines = 1,
@@ -442,6 +465,18 @@ private fun FeaturedRestaurant(
                     text = "• ${restaurant.waitTime}",
                     color = Color.White.copy(alpha = 0.70f),
                     fontSize = 12.sp
+                )
+            }
+
+            if (reasons.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "✨ " + reasons.take(3).joinToString(" · "),
+                    color = Color.White.copy(alpha = 0.90f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -496,7 +531,8 @@ private fun RestaurantCard(
     restaurant: Restaurant,
     isSaved: Boolean,
     onSelect: (Restaurant) -> Unit,
-    crowdingReports: List<Int>
+    crowdingReports: List<Int>,
+    distanceMeters: Float?
 ) {
     Row(
         modifier = Modifier
@@ -577,7 +613,11 @@ private fun RestaurantCard(
             Spacer(modifier = Modifier.height(2.dp))
 
             Text(
-                text = restaurant.location,
+                text = if (distanceMeters != null) {
+                    "${restaurant.location} · ${formatDistance(distanceMeters)}"
+                } else {
+                    restaurant.location
+                },
                 color = Muted,
                 fontSize = 11.sp,
                 maxLines = 1,

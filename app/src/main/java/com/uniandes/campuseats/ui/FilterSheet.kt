@@ -141,6 +141,7 @@ fun FilterSheet(
                 ToggleRow("Saved only", "Spots you bookmarked", draft.savedOnly) {
                     draft = draft.copy(savedOnly = it)
                 }
+
             }
 
             SectionLabel("Price range")

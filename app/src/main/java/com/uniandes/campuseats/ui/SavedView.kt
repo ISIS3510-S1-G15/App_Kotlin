@@ -44,7 +44,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.location.Location
 import coil.compose.AsyncImage
+import com.uniandes.campuseats.sensor.locationLabel
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.restaurants
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
@@ -105,7 +107,8 @@ private fun PathIcon(
 fun SavedView(
     onSelect: (Restaurant) -> Unit,
     crowding: Map<String, List<Int>>,
-    savedIds: Set<String>
+    savedIds: Set<String>,
+    userLocation: Location?
 ) {
     var dietaryFilters by remember { mutableStateOf(listOf<String>()) }
     val saved = restaurants.filter { it.id in savedIds }
@@ -314,7 +317,8 @@ fun SavedView(
                         SavedCard(
                             restaurant = r,
                             onSelect = onSelect,
-                            crowdingReports = crowding[r.id] ?: emptyList()
+                            crowdingReports = crowding[r.id] ?: emptyList(),
+                            userLocation = userLocation
                         )
                     }
                 }
@@ -414,7 +418,8 @@ fun SavedView(
 private fun SavedCard(
     restaurant: Restaurant,
     onSelect: (Restaurant) -> Unit,
-    crowdingReports: List<Int>
+    crowdingReports: List<Int>,
+    userLocation: Location?
 ) {
     val r = restaurant
     val shape = RoundedCornerShape(16.dp)
@@ -503,7 +508,7 @@ private fun SavedCard(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 PathIcon(PIN_PATH, 10.dp, fill = Accent, alpha = 0.6f)
-                Text(text = r.location, fontSize = 11.sp, color = Muted)
+                Text(text = locationLabel(r, userLocation), fontSize = 11.sp, color = Muted)
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
