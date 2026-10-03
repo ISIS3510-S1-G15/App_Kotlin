@@ -49,6 +49,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
@@ -226,6 +232,33 @@ fun DetailView(
         }
 
         Column(modifier = Modifier.offset(y = (-24).dp)) {
+            // Google Map. De momento solo muestra un recuadro gris porque falta la llave de la API
+            val restaurantLocation = LatLng(r.latitude, r.longitude)
+            val cameraPositionState = rememberCameraPositionState {
+                position = CameraPosition.fromLatLngZoom(restaurantLocation, 17f)
+            }
+
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 12.dp)
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, Outline, RoundedCornerShape(16.dp))
+            ) {
+                GoogleMap(
+                    modifier = Modifier.fillMaxSize(),
+                    cameraPositionState = cameraPositionState
+                ) {
+                    Marker(
+                        state = MarkerState(position = restaurantLocation),
+                        title = r.name,
+                        snippet = r.location
+                    )
+                }
+            }
+
             // Hours & tags
             Column(
                 modifier = Modifier

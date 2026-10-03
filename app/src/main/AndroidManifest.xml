@@ -16,6 +16,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.CampusEats">
+
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="LLAVE_FALSA" />
+        <!--Cuando por fin me deje activar mi cuenta de google cloud se coloca la llave y deberia funcionar sin problema
+            pues la implementacion esta completa aparte de la llave-->
         <activity
             android:name=".MainActivity"
             android:exported="true"
