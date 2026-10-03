@@ -8,8 +8,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -499,6 +501,7 @@ private fun RestaurantCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(IntrinsicSize.Min)
             .shadow(2.dp, RoundedCornerShape(16.dp))
             .background(Color.White)
             .border(1.dp, SoftBorder, RoundedCornerShape(16.dp))
@@ -507,8 +510,8 @@ private fun RestaurantCard(
     ) {
         Box(
             modifier = Modifier
-                .width(150.dp)
-                .height(135.dp)
+                .weight(1f)
+                .fillMaxHeight()
         ) {
             AsyncImage(
                 model = restaurant.image,
@@ -540,7 +543,7 @@ private fun RestaurantCard(
 
         Column(
             modifier = Modifier
-                .weight(1f)
+                .weight(2f)
                 .padding(12.dp)
         ) {
             Row(
