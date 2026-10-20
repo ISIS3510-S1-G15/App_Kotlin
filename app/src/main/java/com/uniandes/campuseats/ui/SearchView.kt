@@ -82,6 +82,7 @@ fun SearchView(
     onSelect: (Restaurant) -> Unit,
     crowding: Map<String, List<Int>>,
     userLocation: Location?,
+    onFilterUsed: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var query by remember { mutableStateOf("") }
@@ -244,7 +245,10 @@ fun SearchView(
                 )
 
                 PopularTags(
-                    onTagClick = { query = it }
+                    onTagClick = {
+                        query = it
+                        onFilterUsed(it)
+                    }
                 )
 
                 Column(modifier = Modifier.fillMaxWidth()) {

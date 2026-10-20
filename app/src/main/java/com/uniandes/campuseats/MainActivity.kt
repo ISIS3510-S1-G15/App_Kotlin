@@ -28,8 +28,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.uniandes.campuseats.analytics.AnalyticsScreen
+import com.uniandes.campuseats.analytics.AnalyticsViewModel
 import com.uniandes.campuseats.data.AppDataStore
 import com.uniandes.campuseats.data.ProfileStore
 import com.uniandes.campuseats.data.Restaurant
@@ -68,6 +71,7 @@ fun CampusEatsMainScreen() {
     val context = LocalContext.current
     val profileStore = remember { ProfileStore(context.applicationContext) }
     val dataStore = remember { AppDataStore(context.applicationContext) }
+    val analytics: AnalyticsViewModel = viewModel(factory = AnalyticsViewModel.factory(context))
 
     var surveyDone by remember { mutableStateOf(profileStore.isSurveyDone) }
     var profile by remember { mutableStateOf(profileStore.load()) }
@@ -107,9 +111,13 @@ fun CampusEatsMainScreen() {
     }
 
     // Tocar un restaurante → primero el modal de ocupación, luego el detalle
-    val requestDetail: (Restaurant) -> Unit = { pendingRestaurant = it }
+    val requestDetail: (Restaurant) -> Unit = {
+        pendingRestaurant = it
+        analytics.onRestaurantChecked(it.id, currentTab)
+    }
 
     fun commitDetail(r: Restaurant) {
+        analytics.onRestaurantSelected(r.id, currentTab)
         selectedRestaurant = r
         pendingRestaurant = null
         overlayStack.clear()
@@ -211,6 +219,7 @@ fun CampusEatsMainScreen() {
 
                 overlay == Overlay.Survey -> SurveyView(
                     onComplete = { answers ->
+                        analytics.onProfileSaved(profile, answers)
                         profileStore.save(answers)
                         profile = answers
                         popOverlay()
@@ -225,17 +234,20 @@ fun CampusEatsMainScreen() {
                         crowding = crowding,
                         savedIds = savedIds,
                         reviews = reviews,
-                        userLocation = userLocation.location
+                        userLocation = userLocation.location,
+                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Home) }
                     )
                     1 -> SearchView(
                         onSelect = requestDetail,
                         crowding = crowding,
-                        userLocation = userLocation.location
+                        userLocation = userLocation.location,
+                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Search) }
                     )
                     2 -> MapView(
                         onSelect = requestDetail,
                         crowding = crowding,
-                        userLocation = userLocation.location
+                        userLocation = userLocation.location,
+                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Map) }
                     )
                     3 -> SavedView(
                         onSelect = requestDetail,

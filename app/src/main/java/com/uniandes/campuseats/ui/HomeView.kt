@@ -89,6 +89,7 @@ fun HomeView(
     savedIds: Set<String>,
     reviews: List<Review>,
     userLocation: Location?,
+    onFilterUsed: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var search by remember { mutableStateOf("") }
@@ -254,7 +255,12 @@ fun HomeView(
                     CategoryChip(
                         text = category,
                         selected = activeCategory == category,
-                        onClick = { activeCategory = category }
+                        onClick = {
+                            if (activeCategory != category) {
+                                activeCategory = category
+                                onFilterUsed(category)
+                            }
+                        }
                     )
                 }
             }

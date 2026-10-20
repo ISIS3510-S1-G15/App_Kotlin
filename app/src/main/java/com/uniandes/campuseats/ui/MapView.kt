@@ -104,7 +104,8 @@ private fun PathIcon(
 fun MapView(
     onSelect: (Restaurant) -> Unit,
     crowding: Map<String, List<Int>>,
-    userLocation: Location?
+    userLocation: Location?,
+    onFilterUsed: (String) -> Unit = {}
 ) {
     var selected by remember { mutableStateOf<Restaurant?>(null) }
     var filter by remember { mutableStateOf("all") }
@@ -147,7 +148,12 @@ fun MapView(
                     .clip(CircleShape)
                     .background(if (allActive) Ink else Color.White)
                     .then(if (!allActive) Modifier.border(1.dp, BorderColor, CircleShape) else Modifier)
-                    .clickable { filter = "all" }
+                    .clickable {
+                        if (filter != "all") {
+                            filter = "all"
+                            onFilterUsed("All Spots")
+                        }
+                    }
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
             val openActive = filter == "open"
@@ -160,7 +166,12 @@ fun MapView(
                     .clip(CircleShape)
                     .background(if (openActive) Green else Color.White)
                     .then(if (!openActive) Modifier.border(1.dp, BorderColor, CircleShape) else Modifier)
-                    .clickable { filter = "open" }
+                    .clickable {
+                        if (filter != "open") {
+                            filter = "open"
+                            onFilterUsed("Open Now")
+                        }
+                    }
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
         }
