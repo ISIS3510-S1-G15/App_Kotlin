@@ -5,9 +5,5 @@ enum class AnalyticsScreen(val wireName: String) {
     Search("search"),
     Map("map"),
     Saved("saved"),
-    Profile("profile");
-
-    companion object {
-        fun fromTab(index: Int): AnalyticsScreen = entries.getOrElse(index) { Home }
-    }
+    Profile("profile")
 }

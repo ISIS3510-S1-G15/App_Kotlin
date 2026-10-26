@@ -90,10 +90,11 @@ private enum class ChipColor { Brand, Green, Amber }
 @Composable
 fun SurveyView(
     onComplete: (Profile) -> Unit,
-    isOnboarding: Boolean = false
+    isOnboarding: Boolean = false,
+    initialName: String = ""
 ) {
     var step by remember { mutableIntStateOf(0) }
-    var name by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
     var cuisines by remember { mutableStateOf(listOf<String>()) }
     var dietary by remember { mutableStateOf(listOf<String>()) }
     var mealTimes by remember { mutableStateOf(listOf<String>()) }

@@ -10,12 +10,15 @@ class AnalyticsRepository(
         gateway.send(FILTER_USAGE_PATH, mapOf("filter" to filter, "screen" to screen.wireName))
     }
 
-    fun logOccupancyChecked(restaurantId: String, screen: AnalyticsScreen) {
-        logOccupancy(restaurantId, screen, ACTION_CHECKED)
+    fun logOccupancyChecked(restaurantId: String, hasData: Boolean) {
+        gateway.send(
+            OCCUPANCY_PATH,
+            mapOf("restaurant_id" to restaurantId, "event" to EVENT_CHECKED, "has_data" to hasData)
+        )
     }
 
-    fun logOccupancySelected(restaurantId: String, screen: AnalyticsScreen) {
-        logOccupancy(restaurantId, screen, ACTION_SELECTED)
+    fun logGoDecision(restaurantId: String) {
+        gateway.send(OCCUPANCY_PATH, mapOf("restaurant_id" to restaurantId, "event" to EVENT_GO_DECISION))
     }
 
     fun logProfileEdits(old: Profile, updated: Profile) {
@@ -27,18 +30,11 @@ class AnalyticsRepository(
         }
     }
 
-    private fun logOccupancy(restaurantId: String, screen: AnalyticsScreen, action: String) {
-        gateway.send(
-            OCCUPANCY_PATH,
-            mapOf("restaurant_id" to restaurantId, "screen" to screen.wireName, "action" to action)
-        )
-    }
-
     companion object {
         const val FILTER_USAGE_PATH = "/analytics/filter-usage"
-        const val OCCUPANCY_PATH = "/analytics/occupancy-check"
+        const val OCCUPANCY_PATH = "/analytics/occupancy-event"
         const val PROFILE_EDIT_PATH = "/analytics/profile-edit"
-        const val ACTION_CHECKED = "checked"
-        const val ACTION_SELECTED = "selected"
+        const val EVENT_CHECKED = "occupancy_checked"
+        const val EVENT_GO_DECISION = "go_decision"
     }
 }

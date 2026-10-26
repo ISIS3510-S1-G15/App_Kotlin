@@ -39,6 +39,10 @@ class ProfileStore(context: Context) {
         }
     }
 
+    fun clear() {
+        prefs.edit { clear() }
+    }
+
     private fun getList(key: String): List<String> =
         prefs.getString(key, "").orEmpty().split(SEPARATOR).filter { it.isNotBlank() }
 

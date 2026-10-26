@@ -1,6 +1,7 @@
 package com.uniandes.campuseats.analytics
 
 import com.uniandes.campuseats.data.emptyProfile
+import com.uniandes.campuseats.net.ApiException
 import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -38,26 +39,30 @@ class AnalyticsViewModelTest {
     }
 
     @Test
-    fun occupancyCheckAndSelectionMapTabToScreen() = runTest(StandardTestDispatcher()) {
+    fun occupancyCheckSendsEventAndWhetherThereWasData() = runTest(StandardTestDispatcher()) {
         val transport = FakeTransport()
         val vm = viewModel(transport, this)
-        vm.onRestaurantChecked("r1", 0)
-        vm.onRestaurantSelected("r1", 2)
+        vm.onOccupancyChecked("r1", true)
+        vm.onOccupancyChecked("r2", false)
         advanceUntilIdle()
         assertEquals(
             listOf(
-                "/analytics/occupancy-check" to mapOf("restaurant_id" to "r1", "screen" to "home", "action" to "checked"),
-                "/analytics/occupancy-check" to mapOf("restaurant_id" to "r1", "screen" to "map", "action" to "selected")
+                "/analytics/occupancy-event" to mapOf("restaurant_id" to "r1", "event" to "occupancy_checked", "has_data" to true),
+                "/analytics/occupancy-event" to mapOf("restaurant_id" to "r2", "event" to "occupancy_checked", "has_data" to false)
             ),
             transport.requests
         )
     }
 
     @Test
-    fun unknownTabFallsBackToHome() {
-        assertEquals(AnalyticsScreen.Home, AnalyticsScreen.fromTab(99))
-        assertEquals(AnalyticsScreen.Saved, AnalyticsScreen.fromTab(3))
-        assertEquals(AnalyticsScreen.Profile, AnalyticsScreen.fromTab(4))
+    fun goDecisionSendsOnlyRestaurantAndEvent() = runTest(StandardTestDispatcher()) {
+        val transport = FakeTransport()
+        viewModel(transport, this).onGoDecision("r1")
+        advanceUntilIdle()
+        assertEquals(
+            listOf("/analytics/occupancy-event" to mapOf("restaurant_id" to "r1", "event" to "go_decision")),
+            transport.requests
+        )
     }
 
     @Test
@@ -104,8 +109,8 @@ class AnalyticsViewModelTest {
 
     @Test
     fun apiErrorStatusIsSwallowedAndReported() = runTest(StandardTestDispatcher()) {
-        viewModel(FakeTransport(ApiException(500, "boom")), this).onRestaurantChecked("r1", 2)
+        viewModel(FakeTransport(ApiException(500, "boom")), this).onGoDecision("r1")
         advanceUntilIdle()
-        assertEquals(listOf("/analytics/occupancy-check"), failures)
+        assertEquals(listOf("/analytics/occupancy-event"), failures)
     }
 }

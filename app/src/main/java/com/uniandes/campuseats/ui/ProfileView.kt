@@ -53,7 +53,9 @@ private val GreenBorder = Color(0xFFC5E0CB)
 @Composable
 fun ProfileView(
     profile: Profile,
+    userEmail: String,
     onRetakeSurvey: () -> Unit,
+    onLogout: () -> Unit,
     onBack: () -> Unit
 ) {
     val initials = if (profile.name.isNotEmpty()) profile.name.take(2).uppercase() else "ME"
@@ -388,6 +390,31 @@ fun ProfileView(
                 Text(
                     text = "Retake Food Preferences Survey",
                     color = Ink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = "Signed in as $userEmail",
+                color = Muted,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+                    .border(1.dp, Outline, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onLogout),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Log out",
+                    color = Orange,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )

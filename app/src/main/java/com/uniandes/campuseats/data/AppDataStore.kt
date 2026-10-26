@@ -53,10 +53,14 @@ class AppDataStore(context: Context) {
 
     fun loadSavedIds(): Set<String> =
         prefs.getStringSet(KEY_SAVED, null)?.toSet()
-            ?: restaurants.filter { it.saved }.map { it.id }.toSet()
+            ?: emptySet()
 
     fun saveSavedIds(ids: Set<String>) {
         prefs.edit { putStringSet(KEY_SAVED, ids) }
+    }
+
+    fun clearSavedIds() {
+        prefs.edit { remove(KEY_SAVED) }
     }
 
     private fun reviewToJson(review: Review) = JSONObject().apply {

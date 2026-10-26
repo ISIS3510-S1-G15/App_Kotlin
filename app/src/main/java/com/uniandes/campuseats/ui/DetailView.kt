@@ -50,7 +50,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.content.Intent
 import android.location.Location
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.config.Configuration
@@ -90,9 +94,11 @@ fun DetailView(
     onToggleSave: () -> Unit,
     onBack: () -> Unit,
     onWriteReview: () -> Unit,
-    onSeeReviews: () -> Unit
+    onSeeReviews: () -> Unit,
+    onGetDirections: () -> Unit
 ) {
     val r = restaurant
+    val context = LocalContext.current
     var activeMenu by remember(r.id) { mutableIntStateOf(0) }
 
     val reviewAvg = if (reviews.isNotEmpty()) {
@@ -510,11 +516,40 @@ fun DetailView(
                 }
             }
 
-            // Review CTAs
             Column(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Ink)
+                        .clickable {
+                            onGetDirections()
+                            val uri = Uri.parse(
+                                "https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}&travelmode=walking"
+                            )
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Could not open the map", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.LocationOn, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Get directions",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = OutfitFontFamily
+                    )
+                }
                 val n = reviews.size
                 Row(
                     modifier = Modifier

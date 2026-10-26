@@ -1,6 +1,7 @@
 package com.uniandes.campuseats
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -21,11 +22,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -33,15 +36,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.uniandes.campuseats.analytics.AnalyticsScreen
 import com.uniandes.campuseats.analytics.AnalyticsViewModel
+import com.uniandes.campuseats.auth.AuthUser
+import com.uniandes.campuseats.auth.AuthViewModel
 import com.uniandes.campuseats.data.AppDataStore
 import com.uniandes.campuseats.data.ProfileStore
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.rememberUserLocation
 import com.uniandes.campuseats.ui.CrowdingModal
 import com.uniandes.campuseats.ui.DetailView
 import com.uniandes.campuseats.ui.HomeView
+import com.uniandes.campuseats.ui.LoadingView
+import com.uniandes.campuseats.ui.LoginView
 import com.uniandes.campuseats.ui.MapView
 import com.uniandes.campuseats.ui.ProfileView
 import com.uniandes.campuseats.ui.ReviewsListView
@@ -49,6 +57,8 @@ import com.uniandes.campuseats.ui.SavedView
 import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,10 +79,42 @@ private const val PROFILE_TAB = 4
 @Composable
 fun CampusEatsMainScreen() {
     val context = LocalContext.current
+    val services = remember { AppServices.get(context) }
+    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository))
+    val user = auth.user
+
+    when {
+        auth.restoring -> LoadingView()
+        user == null -> LoginView(
+            loading = auth.loading,
+            error = auth.error,
+            onLogin = auth::login,
+            onRegister = auth::register,
+            onInputChanged = auth::clearError
+        )
+        else -> key(user.id) {
+            CampusEatsApp(
+                services = services,
+                user = user,
+                onLogout = {
+                    ProfileStore(context.applicationContext).clear()
+                    AppDataStore(context.applicationContext).clearSavedIds()
+                    auth.logout()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val profileStore = remember { ProfileStore(context.applicationContext) }
     val dataStore = remember { AppDataStore(context.applicationContext) }
-    val analytics: AnalyticsViewModel = viewModel(factory = AnalyticsViewModel.factory(context))
+    val analytics: AnalyticsViewModel = viewModel(factory = AnalyticsViewModel.factory(services))
 
+    var profileResolved by remember { mutableStateOf(profileStore.isSurveyDone) }
     var surveyDone by remember { mutableStateOf(profileStore.isSurveyDone) }
     var profile by remember { mutableStateOf(profileStore.load()) }
     var currentTab by remember { mutableIntStateOf(0) }
@@ -87,10 +129,29 @@ fun CampusEatsMainScreen() {
     val crowding = remember { mutableStateMapOf<String, List<Int>>().apply { putAll(dataStore.loadCrowding()) } }
     var savedIds by remember { mutableStateOf(dataStore.loadSavedIds()) }
 
+    LaunchedEffect(user.id) {
+        attemptOrNull { services.profileRepository.fetch() }?.let { remote ->
+            val restored = remote.copy(name = remote.name.ifBlank { user.name })
+            profileStore.save(restored)
+            profile = restored
+            surveyDone = true
+        }
+        profileResolved = true
+        attemptOrNull { services.savedRepository.fetch() }?.let {
+            savedIds = it
+            dataStore.saveSavedIds(it)
+        }
+    }
+
     // Sensor GPS: se pide el permiso al terminar el onboarding y se comparte con las pantallas
     val userLocation = rememberUserLocation()
     LaunchedEffect(surveyDone) {
         if (surveyDone && !userLocation.hasPermission) userLocation.requestPermission()
+    }
+
+    if (!profileResolved) {
+        LoadingView()
+        return
     }
 
     // Onboarding: encuesta a pantalla completa solo la primera vez
@@ -99,10 +160,13 @@ fun CampusEatsMainScreen() {
             Box(modifier = Modifier.padding(paddingValues)) {
                 SurveyView(
                     isOnboarding = true,
+                    initialName = user.name,
                     onComplete = { answers ->
-                        profileStore.save(answers)
-                        profile = answers
+                        val completed = answers.copy(name = answers.name.ifBlank { user.name })
+                        profileStore.save(completed)
+                        profile = completed
                         surveyDone = true
+                        scope.launch { attemptOrNull { services.profileRepository.save(completed) } }
                     }
                 )
             }
@@ -113,11 +177,10 @@ fun CampusEatsMainScreen() {
     // Tocar un restaurante → primero el modal de ocupación, luego el detalle
     val requestDetail: (Restaurant) -> Unit = {
         pendingRestaurant = it
-        analytics.onRestaurantChecked(it.id, currentTab)
     }
 
     fun commitDetail(r: Restaurant) {
-        analytics.onRestaurantSelected(r.id, currentTab)
+        analytics.onOccupancyChecked(r.id, crowding[r.id].orEmpty().isNotEmpty())
         selectedRestaurant = r
         pendingRestaurant = null
         overlayStack.clear()
@@ -125,8 +188,25 @@ fun CampusEatsMainScreen() {
     }
 
     fun toggleSaved(id: String) {
-        savedIds = if (id in savedIds) savedIds - id else savedIds + id
-        dataStore.saveSavedIds(savedIds)
+        val before = savedIds
+        val wasSaved = id in before
+        savedIds = if (wasSaved) before - id else before + id
+        scope.launch {
+            try {
+                val confirmed = if (wasSaved) {
+                    services.savedRepository.remove(id)
+                } else {
+                    services.savedRepository.add(id)
+                }
+                savedIds = confirmed
+                dataStore.saveSavedIds(confirmed)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                savedIds = before
+                Toast.makeText(context, "Could not update your saved spots", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     fun popOverlay() {
@@ -194,7 +274,8 @@ fun CampusEatsMainScreen() {
                     onToggleSave = { toggleSaved(restaurant.id) },
                     onBack = ::closeAll,
                     onWriteReview = { overlayStack.add(Overlay.WriteReview) },
-                    onSeeReviews = { overlayStack.add(Overlay.ReviewsList) }
+                    onSeeReviews = { overlayStack.add(Overlay.ReviewsList) },
+                    onGetDirections = { analytics.onGoDecision(restaurant.id) }
                 )
 
                 overlay == Overlay.WriteReview && restaurant != null -> WriteReviewView(
@@ -218,10 +299,13 @@ fun CampusEatsMainScreen() {
                 )
 
                 overlay == Overlay.Survey -> SurveyView(
+                    initialName = profile.name,
                     onComplete = { answers ->
-                        analytics.onProfileSaved(profile, answers)
-                        profileStore.save(answers)
-                        profile = answers
+                        val updated = answers.copy(name = answers.name.ifBlank { user.name })
+                        analytics.onProfileSaved(profile, updated)
+                        profileStore.save(updated)
+                        profile = updated
+                        scope.launch { attemptOrNull { services.profileRepository.save(updated) } }
                         popOverlay()
                     }
                 )
@@ -257,7 +341,9 @@ fun CampusEatsMainScreen() {
                     )
                     PROFILE_TAB -> ProfileView(
                         profile = profile,
+                        userEmail = user.email,
                         onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
+                        onLogout = onLogout,
                         onBack = { selectTab(0) }
                     )
                 }
