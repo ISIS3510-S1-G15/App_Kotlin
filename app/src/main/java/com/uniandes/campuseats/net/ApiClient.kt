@@ -5,10 +5,17 @@ import java.net.URL
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 class ApiException(val statusCode: Int, val body: String) : Exception("HTTP $statusCode: $body") {
-    val detail: String? = runCatching { JSONObject(body).opt("detail") as? String }.getOrNull()
+    val detail: String? = runCatching {
+        when (val raw = JSONObject(body).opt("detail")) {
+            is String -> raw
+            is JSONArray -> raw.getJSONObject(0).getString("msg").removePrefix("Value error, ")
+            else -> null
+        }
+    }.getOrNull()
 }
 
 interface RemoteApi {

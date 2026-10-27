@@ -9,7 +9,7 @@ class AuthValidationTest {
     @Test
     fun validCredentialsHaveNoProblem() {
         assertNull(AuthValidation.validate(null, "ana@uniandes.edu.co", "password1"))
-        assertNull(AuthValidation.validate("Ana", " Ana@Uniandes.edu.co ", "password1"))
+        assertNull(AuthValidation.validate("Ana", " Ana@Uniandes.edu.co ", "password1!"))
     }
 
     @Test
@@ -37,8 +37,22 @@ class AuthValidationTest {
     }
 
     @Test
+    fun registrationRequiresLetterNumberAndSpecialCharacter() {
+        val message = "Password needs at least one letter, one number and one special character"
+        assertEquals(message, AuthValidation.validate("Ana", "ana@uniandes.edu.co", "password123"))
+        assertEquals(message, AuthValidation.validate("Ana", "ana@uniandes.edu.co", "12345678!"))
+        assertEquals(message, AuthValidation.validate("Ana", "ana@uniandes.edu.co", "abcdefgh!"))
+        assertNull(AuthValidation.validate("Ana", "ana@uniandes.edu.co", "abcdefg1!"))
+    }
+
+    @Test
+    fun loginDoesNotEnforcePasswordStrength() {
+        assertNull(AuthValidation.validate(null, "ana@uniandes.edu.co", "password123"))
+    }
+
+    @Test
     fun blankNameIsRejectedOnlyWhenNameIsRequired() {
-        assertEquals("Enter your name", AuthValidation.validate("  ", "ana@uniandes.edu.co", "password1"))
+        assertEquals("Enter your name", AuthValidation.validate("  ", "ana@uniandes.edu.co", "password1!"))
         assertNull(AuthValidation.validate(null, "ana@uniandes.edu.co", "password1"))
     }
 }

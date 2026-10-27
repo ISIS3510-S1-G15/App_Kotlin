@@ -78,7 +78,11 @@ fun LoginView(
             fontFamily = OutfitFontFamily
         )
         Text(
-            text = "Use your institutional email (@uniandes.edu.co)",
+            text = if (registerMode) {
+                "Institutional email (@uniandes.edu.co). Password: 8+ characters with a letter, a number and a special character"
+            } else {
+                "Use your institutional email (@uniandes.edu.co)"
+            },
             color = Muted,
             fontSize = 13.sp
         )

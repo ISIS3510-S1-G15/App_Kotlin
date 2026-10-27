@@ -44,7 +44,7 @@ class BackendEndToEndTest {
             AuthRepository(api, session).register(
                 "E2E Tester",
                 "e2e-${System.currentTimeMillis()}@uniandes.edu.co",
-                "password123"
+                "password123!"
             )
             val job = Job()
             val gateway = AnalyticsGateway(

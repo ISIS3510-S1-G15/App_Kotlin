@@ -54,6 +54,16 @@ class AuthRepositoryTest {
     }
 
     @Test
+    fun validationErrorListUsesFirstMessage() = runTest {
+        val body = """{"detail":[{"type":"value_error","loc":["body","password"],"msg":"Value error, Password too weak"}]}"""
+        val api = FakeRemoteApi(failure = ApiException(422, body))
+        val error = assertThrows(AuthException::class.java) {
+            kotlinx.coroutines.runBlocking { AuthRepository(api, MemorySession()).register("Ana", "ana@uniandes.edu.co", "password1") }
+        }
+        assertEquals("Password too weak", error.message)
+    }
+
+    @Test
     fun missingDetailFallsBackToStatusMessage() = runTest {
         val api = FakeRemoteApi(failure = ApiException(401, ""))
         val error = assertThrows(AuthException::class.java) {
