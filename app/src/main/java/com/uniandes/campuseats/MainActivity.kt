@@ -331,6 +331,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         onSelect = requestDetail,
                         crowding = crowding,
                         userLocation = userLocation.location,
+                        hasLocationPermission = userLocation.hasPermission,
+                        onRetryLocation = userLocation.requestPermission,
                         onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Map) }
                     )
                     3 -> SavedView(

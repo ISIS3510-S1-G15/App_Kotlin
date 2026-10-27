@@ -9,7 +9,7 @@ interface AnalyticsTransport {
 
 class HttpAnalyticsTransport(private val api: RemoteApi) : AnalyticsTransport {
 
-    constructor(baseUrl: String, timeoutMs: Int = 5_000) : this(HttpRemoteApi(baseUrl, timeoutMs))
+    constructor(baseUrl: String, timeoutMs: Int = 15_000) : this(HttpRemoteApi(baseUrl, timeoutMs))
 
     override suspend fun post(path: String, body: Map<String, Any>) {
         api.post(path, body)

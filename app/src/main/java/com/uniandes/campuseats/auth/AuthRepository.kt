@@ -44,9 +44,9 @@ class AuthRepository(
         } catch (e: ApiException) {
             throw AuthException(e.detail ?: messageFor(e.statusCode))
         } catch (e: SocketTimeoutException) {
-            throw AuthException("The server took too long to answer. Try again.")
+            throw AuthException("The server took too long to answer. Check that the backend is running and try again.")
         } catch (e: Exception) {
-            throw AuthException("Could not connect to the server. Check your internet connection.")
+            throw AuthException("Could not connect to the server. Check that the backend is running and your connection.")
         }
         val user = AuthUser.fromJson(response.getJSONObject("user"))
         storage.token = response.getString("access_token")

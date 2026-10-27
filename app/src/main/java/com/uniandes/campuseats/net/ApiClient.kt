@@ -27,7 +27,7 @@ interface RemoteApi {
 
 class HttpRemoteApi(
     private val baseUrl: String,
-    private val timeoutMs: Int = 5_000,
+    private val timeoutMs: Int = 15_000,
     private val tokenProvider: () -> String? = { null }
 ) : RemoteApi {
 

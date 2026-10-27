@@ -54,6 +54,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Profile
+import com.uniandes.campuseats.data.greetingFor
+import com.uniandes.campuseats.data.mealSlotFor
+import java.util.Calendar
 import android.location.Location
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
@@ -128,6 +131,9 @@ fun HomeView(
     // Smart feature: el mejor restaurante para este usuario, ahora mismo
     val pick = recommend(restaurants, profile, reviews, crowding, distances).firstOrNull()
     val featured = pick?.restaurant
+    val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
+    val mealSlot = mealSlotFor(hour)
+    val usualMealTime = mealSlot in profile.usualMealTimes
 
     BackHandler(enabled = showFilters) { showFilters = false }
 
@@ -162,7 +168,7 @@ fun HomeView(
                         Text(
                             text = profile.name
                                 .takeIf { it.isNotBlank() }
-                                ?.let { "Hola, $it 👋" }
+                                ?.let { "${greetingFor(hour)}, $it 👋" }
                                 ?: "Campus Eats",
                             color = Brown,
                             fontSize = 26.sp,
@@ -214,12 +220,27 @@ fun HomeView(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Today's Pick",
-                            color = Brown,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Column {
+                            Text(
+                                text = "Today's Pick",
+                                color = Brown,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (featured.isOpen) "$mealSlot time · open now" else "$mealSlot time · everything is closed right now",
+                                color = Orange,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (usualMealTime) {
+                                Text(
+                                    text = "You usually eat at this time 🍽️",
+                                    color = Muted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
                         Text(
                             text = "See all",
                             color = Orange,

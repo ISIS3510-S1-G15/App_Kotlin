@@ -49,7 +49,16 @@ import org.osmdroid.views.MapView as OsmMapView
 import org.osmdroid.views.overlay.Marker
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.locationLabel
+import com.uniandes.campuseats.data.CAMPUS_LATITUDE
+import com.uniandes.campuseats.data.CAMPUS_LONGITUDE
 import com.uniandes.campuseats.data.Restaurant
+import com.uniandes.campuseats.data.closestOpenSpot
+import com.uniandes.campuseats.data.currentMinutesOfDay
+import com.uniandes.campuseats.data.isOnCampus
+import com.uniandes.campuseats.data.walkingMinutes
+import com.uniandes.campuseats.sensor.distanceMeters
+import com.uniandes.campuseats.sensor.formatDistance
+import java.util.Calendar
 import com.uniandes.campuseats.data.restaurants
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 
@@ -105,12 +114,23 @@ fun MapView(
     onSelect: (Restaurant) -> Unit,
     crowding: Map<String, List<Int>>,
     userLocation: Location?,
+    hasLocationPermission: Boolean = true,
+    onRetryLocation: () -> Unit = {},
     onFilterUsed: (String) -> Unit = {}
 ) {
     var selected by remember { mutableStateOf<Restaurant?>(null) }
     var filter by remember { mutableStateOf("all") }
 
-    val visible = if (filter == "all") restaurants else restaurants.filter { it.isOpen }
+    val distances = userLocation
+        ?.let { loc -> restaurants.associate { it.id to distanceMeters(loc, it) } }
+        .orEmpty()
+    val openOrAll = if (filter == "all") restaurants else restaurants.filter { it.isOpen }
+    val visible = if (distances.isEmpty()) openOrAll else openOrAll.sortedBy { distances.getValue(it.id) }
+    val distanceToCampus = userLocation?.let { loc ->
+        FloatArray(1).also {
+            Location.distanceBetween(loc.latitude, loc.longitude, CAMPUS_LATITUDE, CAMPUS_LONGITUDE, it)
+        }[0]
+    }
 
     Column(
         modifier = Modifier
@@ -174,6 +194,42 @@ fun MapView(
                     }
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
+        }
+
+        val suggestion = if (distanceToCampus != null && isOnCampus(distanceToCampus)) {
+            closestOpenSpot(
+                restaurants,
+                distances,
+                Calendar.getInstance().get(Calendar.HOUR_OF_DAY),
+                currentMinutesOfDay()
+            )
+        } else {
+            null
+        }
+        when {
+            userLocation == null && !hasLocationPermission -> LocationBanner(
+                text = "Location unavailable. Allow location access to see the closest spots",
+                actionLabel = "Retry",
+                onAction = onRetryLocation
+            )
+            userLocation == null -> LocationBanner(text = "Finding your location…")
+            distanceToCampus != null && !isOnCampus(distanceToCampus) -> LocationBanner(
+                text = "You're ${formatDistance(distanceToCampus)} away from campus"
+            )
+            suggestion == null -> LocationBanner(text = "No spots are open near you right now")
+            else -> {
+                val spot = suggestion.restaurant
+                val distanceLabel = "${formatDistance(suggestion.distanceMeters)} · ${walkingMinutes(suggestion.distanceMeters)} min walk"
+                LocationBanner(
+                    text = if (suggestion.meal != null) {
+                        "${suggestion.meal.label} time · Closest for ${suggestion.meal.label.lowercase()}: ${spot.name} · $distanceLabel"
+                    } else {
+                        "Closest open spot: ${spot.name} · $distanceLabel"
+                    },
+                    actionLabel = "Show",
+                    onAction = { selected = spot }
+                )
+            }
         }
 
         val mapShape = RoundedCornerShape(24.dp)
@@ -421,7 +477,9 @@ fun MapView(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${r.waitTime} wait",
+                                text = distances[r.id]
+                                    ?.let { "${formatDistance(it)} · ${walkingMinutes(it)} min walk · ${r.waitTime} wait" }
+                                    ?: "${r.waitTime} wait",
                                 fontSize = 11.sp,
                                 color = Muted
                             )
@@ -439,6 +497,38 @@ fun MapView(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LocationBanner(text: String, actionLabel: String? = null, onAction: () -> Unit = {}) {
+    Row(
+        modifier = Modifier
+            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Accent.copy(alpha = 0.1f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(text = "📍", fontSize = 14.sp)
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Ink,
+            modifier = Modifier.weight(1f)
+        )
+        if (actionLabel != null) {
+            Text(
+                text = actionLabel,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Accent,
+                modifier = Modifier.clickable(onClick = onAction)
+            )
         }
     }
 }

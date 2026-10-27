@@ -78,7 +78,7 @@ class AuthRepositoryTest {
         val error = assertThrows(AuthException::class.java) {
             kotlinx.coroutines.runBlocking { AuthRepository(api, MemorySession()).login("ana@uniandes.edu.co", "password1") }
         }
-        assertEquals("Could not connect to the server. Check your internet connection.", error.message)
+        assertEquals("Could not connect to the server. Check that the backend is running and your connection.", error.message)
     }
 
     @Test
