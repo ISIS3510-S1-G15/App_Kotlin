@@ -17,11 +17,11 @@ class AppDataStore(context: Context) {
     // Reseñas
 
     fun loadReviews(): List<Review> {
-        val json = prefs.getString(KEY_REVIEWS, null) ?: return seedReviews
+        val json = prefs.getString(KEY_REVIEWS, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(json)
             (0 until array.length()).map { reviewFromJson(array.getJSONObject(it)) }
-        }.getOrDefault(seedReviews)
+        }.getOrDefault(emptyList())
     }
 
     fun saveReviews(reviews: List<Review>) {
@@ -33,20 +33,32 @@ class AppDataStore(context: Context) {
     // Ocupación (crowding)
 
     fun loadCrowding(): Map<String, List<Int>> {
-        val json = prefs.getString(KEY_CROWDING, null) ?: return seedCrowding
+        val json = prefs.getString(KEY_CROWDING, null) ?: return emptyMap()
         return runCatching {
             val obj = JSONObject(json)
             obj.keys().asSequence().associateWith { id ->
                 val reports = obj.getJSONArray(id)
                 (0 until reports.length()).map { reports.getInt(it) }
             }
-        }.getOrDefault(seedCrowding)
+        }.getOrDefault(emptyMap())
     }
 
     fun saveCrowding(crowding: Map<String, List<Int>>) {
         val obj = JSONObject()
         crowding.forEach { (id, reports) -> obj.put(id, JSONArray(reports)) }
         prefs.edit { putString(KEY_CROWDING, obj.toString()) }
+    }
+
+    fun loadRecentSearches(): List<String> {
+        val json = prefs.getString(KEY_RECENT, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(json)
+            (0 until array.length()).map { array.getString(it) }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveRecentSearches(names: List<String>) {
+        prefs.edit { putString(KEY_RECENT, JSONArray(names).toString()) }
     }
 
     // Guardados
@@ -98,5 +110,6 @@ class AppDataStore(context: Context) {
         const val KEY_REVIEWS = "reviews"
         const val KEY_CROWDING = "crowding"
         const val KEY_SAVED = "saved_ids"
+        const val KEY_RECENT = "recent_searches"
     }
 }

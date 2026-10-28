@@ -49,14 +49,6 @@ private val BarIdle = Color(0xFFD4CAC0)
 
 private data class LevelOption(val value: Int, val label: String, val desc: String, val icon: String)
 
-private val Levels = listOf(
-    LevelOption(1, "Empty", "Plenty of seats", "🪑"),
-    LevelOption(2, "Quiet", "Few people around", "😌"),
-    LevelOption(3, "Moderate", "Some tables taken", "🙂"),
-    LevelOption(4, "Busy", "Hard to find a seat", "😅"),
-    LevelOption(5, "Packed", "Completely full", "😬")
-)
-
 /** Hoja inferior que pregunta qué tan lleno está el restaurante antes de abrir el detalle. */
 @Composable
 fun CrowdingModal(
@@ -64,6 +56,9 @@ fun CrowdingModal(
     onSubmit: (Int) -> Unit,
     onSkip: () -> Unit
 ) {
+    val levels = LocalCatalog.current.options("crowding_levels").mapNotNull { option ->
+        option.value.toIntOrNull()?.let { LevelOption(it, option.label, option.detail.orEmpty(), option.emoji.orEmpty()) }
+    }
     var selected by remember(restaurant.id) { mutableStateOf<Int?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -139,7 +134,7 @@ fun CrowdingModal(
                 modifier = Modifier.padding(bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Levels.forEach { option ->
+                levels.forEach { option ->
                     LevelRow(
                         option = option,
                         isSelected = selected == option.value,

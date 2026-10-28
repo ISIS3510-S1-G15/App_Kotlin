@@ -49,17 +49,11 @@ import org.osmdroid.views.MapView as OsmMapView
 import org.osmdroid.views.overlay.Marker
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.locationLabel
-import com.uniandes.campuseats.data.CAMPUS_LATITUDE
-import com.uniandes.campuseats.data.CAMPUS_LONGITUDE
 import com.uniandes.campuseats.data.Restaurant
-import com.uniandes.campuseats.data.closestOpenSpot
 import com.uniandes.campuseats.data.currentMinutesOfDay
-import com.uniandes.campuseats.data.isOnCampus
-import com.uniandes.campuseats.data.walkingMinutes
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.formatDistance
 import java.util.Calendar
-import com.uniandes.campuseats.data.restaurants
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 
 private val Cream = Color(0xFFFBF5EE)
@@ -119,6 +113,8 @@ fun MapView(
     onFilterUsed: (String) -> Unit = {},
     onMarkerSelected: () -> Unit = {}
 ) {
+    val restaurants = LocalRestaurants.current
+    val mealRules = LocalMealRules.current
     var selected by remember { mutableStateOf<Restaurant?>(null) }
     var filter by remember { mutableStateOf("all") }
 
@@ -127,10 +123,14 @@ fun MapView(
         .orEmpty()
     val openOrAll = if (filter == "all") restaurants else restaurants.filter { it.isOpen }
     val visible = if (distances.isEmpty()) openOrAll else openOrAll.sortedBy { distances.getValue(it.id) }
-    val distanceToCampus = userLocation?.let { loc ->
+    val campusLatitude = mealRules.campusLatitude
+    val campusLongitude = mealRules.campusLongitude
+    val distanceToCampus = if (userLocation != null && campusLatitude != null && campusLongitude != null) {
         FloatArray(1).also {
-            Location.distanceBetween(loc.latitude, loc.longitude, CAMPUS_LATITUDE, CAMPUS_LONGITUDE, it)
+            Location.distanceBetween(userLocation.latitude, userLocation.longitude, campusLatitude, campusLongitude, it)
         }[0]
+    } else {
+        null
     }
 
     Column(
@@ -197,8 +197,8 @@ fun MapView(
             )
         }
 
-        val suggestion = if (distanceToCampus != null && isOnCampus(distanceToCampus)) {
-            closestOpenSpot(
+        val suggestion = if (distanceToCampus != null && mealRules.isOnCampus(distanceToCampus)) {
+            mealRules.closestOpenSpot(
                 restaurants,
                 distances,
                 Calendar.getInstance().get(Calendar.HOUR_OF_DAY),
@@ -214,13 +214,13 @@ fun MapView(
                 onAction = onRetryLocation
             )
             userLocation == null -> LocationBanner(text = "Finding your location…")
-            distanceToCampus != null && !isOnCampus(distanceToCampus) -> LocationBanner(
+            distanceToCampus != null && !mealRules.isOnCampus(distanceToCampus) -> LocationBanner(
                 text = "You're ${formatDistance(distanceToCampus)} away from campus"
             )
             suggestion == null -> LocationBanner(text = "No spots are open near you right now")
             else -> {
                 val spot = suggestion.restaurant
-                val distanceLabel = "${formatDistance(suggestion.distanceMeters)} · ${walkingMinutes(suggestion.distanceMeters)} min walk"
+                val distanceLabel = "${formatDistance(suggestion.distanceMeters)} · ${mealRules.walkingMinutes(suggestion.distanceMeters)} min walk"
                 LocationBanner(
                     text = if (suggestion.meal != null) {
                         "${suggestion.meal.label} time · Closest for ${suggestion.meal.label.lowercase()}: ${spot.name} · $distanceLabel"
@@ -480,7 +480,7 @@ fun MapView(
                             )
                             Text(
                                 text = distances[r.id]
-                                    ?.let { "${formatDistance(it)} · ${walkingMinutes(it)} min walk · ${r.waitTime} wait" }
+                                    ?.let { "${formatDistance(it)} · ${mealRules.walkingMinutes(it)} min walk · ${r.waitTime} wait" }
                                     ?: "${r.waitTime} wait",
                                 fontSize = 11.sp,
                                 color = Muted

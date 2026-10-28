@@ -56,7 +56,6 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.greetingFor
-import com.uniandes.campuseats.data.mealSlotFor
 import java.util.Calendar
 import android.location.Location
 import com.uniandes.campuseats.data.Restaurant
@@ -64,7 +63,6 @@ import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.recommend
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.formatDistance
-import com.uniandes.campuseats.data.restaurants
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -79,10 +77,6 @@ private val Green = Color(0xFF3A8C4F)
 private val SoftGreen = Color(0xFFE8F5EB)
 private val SoftGray = Color(0xFFF0EEEC)
 private val LightMuted = Color(0xFFB8AC9E)
-
-private val Categories = listOf(
-    "All", "Dining Hall", "Café", "Asian", "Burgers", "Indian", "Smoothies"
-)
 
 @Composable
 fun HomeView(
@@ -100,6 +94,8 @@ fun HomeView(
     onFiltersCleared: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val restaurants = LocalRestaurants.current
+    val categories = remember(restaurants) { listOf("All") + restaurants.map { it.category }.distinct() }
     var search by remember { mutableStateOf("") }
     var activeCategory by remember { mutableStateOf("All") }
     var filters by remember { mutableStateOf(HomeFilters()) }
@@ -137,7 +133,7 @@ fun HomeView(
     val pick = recommend(restaurants, profile, reviews, crowding, distances).firstOrNull()
     val featured = pick?.restaurant
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
-    val mealSlot = mealSlotFor(hour)
+    val mealSlot = LocalMealRules.current.mealSlotFor(hour)
     val usualMealTime = mealSlot in profile.usualMealTimes
 
     val openFilterSheet = {
@@ -290,7 +286,7 @@ fun HomeView(
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Categories.forEach { category ->
+                categories.forEach { category ->
                     CategoryChip(
                         text = category,
                         selected = activeCategory == category,

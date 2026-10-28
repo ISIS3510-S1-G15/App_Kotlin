@@ -18,12 +18,7 @@ fun getCrowdingLevel(avg: Double): CrowdingLevel = when {
     else -> CrowdingLevel("Very Busy", Color(0xFFB91C1C), Color(0xFFFDE8E8), Color(0xFFF5AAAA), Color(0xFFDC2626))
 }
 
+fun crowdingLevelValue(avg: Double): Int = Math.round(avg).toInt().coerceIn(1, 5)
+
 fun avgCrowding(reports: List<Int>): Double? =
     if (reports.isEmpty()) null else reports.average()
-
-val seedCrowding = mapOf(
-    "1" to listOf(3, 4, 4, 3, 5, 4, 3),
-    "2" to listOf(2, 2, 3, 2, 1, 2),
-    "3" to listOf(4, 5, 4, 5, 4),
-    "4" to listOf(1, 2, 1, 2, 1, 2, 1)
-)

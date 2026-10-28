@@ -65,6 +65,7 @@ import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.avgCrowding
+import com.uniandes.campuseats.data.crowdingLevelValue
 import com.uniandes.campuseats.data.getCrowdingLevel
 import com.uniandes.campuseats.sensor.formatDistance
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
@@ -375,6 +376,7 @@ fun DetailView(
             // Crowding
             if (crowdAvg != null) {
                 val level = getCrowdingLevel(crowdAvg)
+                val levelLabel = LocalCatalog.current.label("crowding_levels", crowdingLevelValue(crowdAvg).toString()) ?: level.label
                 Column(
                     modifier = Modifier
                         .padding(start = 16.dp, end = 16.dp, top = 12.dp)
@@ -404,7 +406,7 @@ fun DetailView(
                                 gap = 3f
                             )
                             Text(
-                                text = "${level.label} right now",
+                                text = "$levelLabel right now",
                                 color = level.color,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Black,

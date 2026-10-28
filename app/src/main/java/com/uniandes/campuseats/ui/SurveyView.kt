@@ -65,21 +65,6 @@ private val Amber = Color(0xFFF4A735)
 private const val TOTAL_STEPS = 5
 private const val DONE_STEP = TOTAL_STEPS
 
-private val Cuisines = listOf("Colombian", "Mediterranean", "Asian", "American", "Mexican", "Italian", "Indian", "Middle Eastern", "Vegetarian", "Vegan")
-private val Dietary = listOf("None", "Vegetarian", "Vegan", "Gluten-free", "Lactose-free", "Halal", "Kosher", "Nut-free")
-private val MealTimes = listOf("Breakfast", "Mid-morning snack", "Lunch", "Afternoon snack", "Dinner", "Late night")
-private val Frequencies = listOf("Daily", "4–5x / week", "2–3x / week", "Once a week")
-private val Priorities = listOf("Price", "Speed", "Nutrition", "Taste", "Variety", "Proximity", "Sustainability")
-
-private data class BudgetOption(val label: String, val sub: String, val emoji: String)
-
-private val Budgets = listOf(
-    BudgetOption("Under $8.000", "Looking for the best deals", "💸"),
-    BudgetOption("$8.000 – $15.000", "Mid-range, good value", "💵"),
-    BudgetOption("$15.000 – $25.000", "Happy to spend a bit more", "🪙"),
-    BudgetOption("Over $25.000", "Quality is top priority", "💎")
-)
-
 private enum class ChipColor { Brand, Green, Amber }
 
 /**
@@ -93,6 +78,13 @@ fun SurveyView(
     isOnboarding: Boolean = false,
     initialName: String = ""
 ) {
+    val catalog = LocalCatalog.current
+    val cuisineOptions = catalog.labels("survey_cuisines")
+    val dietaryOptions = catalog.labels("survey_dietary")
+    val mealTimeOptions = catalog.labels("meal_slots")
+    val frequencyOptions = catalog.labels("survey_frequencies")
+    val priorityOptions = catalog.labels("survey_priorities")
+    val budgetOptions = catalog.options("survey_budgets")
     var step by remember { mutableIntStateOf(0) }
     var name by remember { mutableStateOf(initialName) }
     var cuisines by remember { mutableStateOf(listOf<String>()) }
@@ -241,18 +233,18 @@ fun SurveyView(
                         singleLine = true
                     )
                     SubQuestion("What cuisines do you love?")
-                    MultiSelect(Cuisines, cuisines, ChipColor.Brand) { cuisines = cuisines.toggle(it) }
+                    MultiSelect(cuisineOptions, cuisines, ChipColor.Brand) { cuisines = cuisines.toggle(it) }
                 }
 
                 1 -> StepCard("🌿", "Any dietary restrictions?", "We'll filter out what doesn't work for you") {
-                    MultiSelect(Dietary, dietary, ChipColor.Green) { dietary = dietary.toggle(it) }
+                    MultiSelect(dietaryOptions, dietary, ChipColor.Green) { dietary = dietary.toggle(it) }
                 }
 
                 2 -> StepCard("🕐", "When do you eat on campus?", "Select your typical meal times") {
-                    MultiSelect(MealTimes, mealTimes, ChipColor.Amber) { mealTimes = mealTimes.toggle(it) }
+                    MultiSelect(mealTimeOptions, mealTimes, ChipColor.Amber) { mealTimes = mealTimes.toggle(it) }
                     SubQuestion("How often?")
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Frequencies.chunked(2).forEach { pair ->
+                        frequencyOptions.chunked(2).forEach { pair ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 pair.forEach { opt ->
                                     val isSelected = frequency == opt
@@ -281,7 +273,7 @@ fun SurveyView(
 
                 3 -> StepCard("💰", "What's your typical meal budget?", "Per meal, in Colombian pesos") {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Budgets.forEach { opt ->
+                        budgetOptions.forEach { opt ->
                             val isSelected = budget == opt.label
                             Row(
                                 modifier = Modifier
@@ -294,7 +286,7 @@ fun SurveyView(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Text(text = opt.emoji, fontSize = 22.sp)
+                                Text(text = opt.emoji.orEmpty(), fontSize = 22.sp)
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = opt.label,
@@ -304,7 +296,7 @@ fun SurveyView(
                                         fontFamily = OutfitFontFamily
                                     )
                                     Text(
-                                        text = opt.sub,
+                                        text = opt.detail.orEmpty(),
                                         color = if (isSelected) Color.White.copy(alpha = 0.8f) else Muted,
                                         fontSize = 11.sp,
                                         modifier = Modifier.padding(top = 2.dp)
@@ -328,7 +320,7 @@ fun SurveyView(
 
                 4 -> StepCard("⭐", "What matters most?", "Pick up to 3 priorities when choosing where to eat") {
                     MultiSelect(
-                        options = Priorities,
+                        options = priorityOptions,
                         selected = priorities,
                         color = ChipColor.Brand,
                         maxLabel = if (priorities.size >= 3) "Max 3 selected" else null

@@ -58,7 +58,11 @@ class HttpRemoteApi(
                     throw ApiException(status, error)
                 }
                 val text = connection.inputStream.bufferedReader().use { it.readText() }
-                if (text.isBlank()) JSONObject() else JSONObject(text)
+                when {
+                    text.isBlank() -> JSONObject()
+                    text.trimStart().startsWith("[") -> JSONObject().put("items", JSONArray(text))
+                    else -> JSONObject(text)
+                }
             } finally {
                 connection.disconnect()
             }
