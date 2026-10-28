@@ -58,7 +58,6 @@ import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.formatDistance
 import com.uniandes.campuseats.data.Restaurant
-import com.uniandes.campuseats.data.restaurants
 
 private val Cream = Color(0xFFFBF5EE)
 private val Brown = Color(0xFF1A1208)
@@ -71,10 +70,14 @@ private val Green = Color(0xFF3A8C4F)
 private val LightMuted = Color(0xFFB8AC9E)
 private val Highlight = Color(0x66F4A735)
 
-private val Recent = listOf("Starbucks", "Kai Sushi", "Cosechas")
-private val PopularTags = listOf(
-    "Open", "Closed", "Vegan options", "Halal", "Open late", "Quick pickup", "Coffee"
-)
+private const val MAX_POPULAR_TAGS = 6
+
+private fun popularTags(restaurants: List<Restaurant>): List<String> {
+    val byFrequency = restaurants.flatMap { it.tags }.groupingBy { it }.eachCount()
+        .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .map { it.key }
+    return (listOf("Open", "Closed") + byFrequency).take(MAX_POPULAR_TAGS)
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -83,8 +86,12 @@ fun SearchView(
     crowding: Map<String, List<Int>>,
     userLocation: Location?,
     onFilterUsed: (String) -> Unit = {},
+    recentSearches: List<String> = emptyList(),
+    onClearRecent: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val restaurants = LocalRestaurants.current
+    val tags = remember(restaurants) { popularTags(restaurants) }
     var query by remember { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
 
@@ -95,7 +102,7 @@ fun SearchView(
         focusRequester.requestFocus()
     }
 
-    val results = remember(query) {
+    val results = remember(query, restaurants) {
         if (query.trim().isNotEmpty()) {
             val q = query.lowercase()
             restaurants.filter { restaurant ->
@@ -241,10 +248,13 @@ fun SearchView(
 
             if (query.isEmpty()) {
                 RecentSearches(
-                    onSelect = onSelect
+                    names = recentSearches,
+                    onSelect = onSelect,
+                    onClear = onClearRecent
                 )
 
                 PopularTags(
+                    tags = tags,
                     onTagClick = {
                         query = it
                         onFilterUsed(it)
@@ -311,8 +321,12 @@ private fun EmptySearchState(query: String) {
 
 @Composable
 private fun RecentSearches(
-    onSelect: (Restaurant) -> Unit
+    names: List<String>,
+    onSelect: (Restaurant) -> Unit,
+    onClear: () -> Unit
 ) {
+    if (names.isEmpty()) return
+    val restaurants = LocalRestaurants.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -336,12 +350,13 @@ private fun RecentSearches(
                 text = "Clear",
                 color = Orange,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clickable(onClick = onClear)
             )
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Recent.forEach { name ->
+            names.forEach { name ->
                 val restaurant = restaurants.find { it.name == name }
 
                 Row(
@@ -390,6 +405,7 @@ private fun RecentSearches(
 
 @Composable
 private fun PopularTags(
+    tags: List<String>,
     onTagClick: (String) -> Unit
 ) {
     Column(
@@ -409,7 +425,7 @@ private fun PopularTags(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            PopularTags.forEach { tag ->
+            tags.forEach { tag ->
                 Surface(
                     modifier = Modifier.clickable { onTagClick(tag) },
                     shape = CircleShape,

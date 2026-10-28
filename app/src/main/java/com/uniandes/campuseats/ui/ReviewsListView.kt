@@ -53,12 +53,18 @@ private val Green = Color(0xFF3A8C4F)
 private val GreenBg = Color(0xFFE8F5EB)
 private val GreenBorder = Color(0xFFC5E0CB)
 
-private val Categories: List<Pair<String, (ReviewRatings) -> Int>> = listOf(
-    "Taste" to { r: ReviewRatings -> r.taste },
-    "Service" to { r: ReviewRatings -> r.attention },
-    "Value" to { r: ReviewRatings -> r.price },
-    "Diet Options" to { r: ReviewRatings -> r.options }
-)
+@Composable
+private fun reviewCategories(): List<Pair<String, (ReviewRatings) -> Int>> {
+    val selectors = mapOf<String, (ReviewRatings) -> Int>(
+        "taste" to { r -> r.taste },
+        "attention" to { r -> r.attention },
+        "price" to { r -> r.price },
+        "options" to { r -> r.options }
+    )
+    return LocalCatalog.current.options("review_categories").mapNotNull { option ->
+        selectors[option.value]?.let { (option.detail ?: option.label) to it }
+    }
+}
 
 private fun formatDate(date: String): String = try {
     val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)
@@ -174,7 +180,7 @@ fun ReviewsListView(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Categories.forEach { (label, selector) ->
+                        reviewCategories().forEach { (label, selector) ->
                             val v = if (reviews.isNotEmpty()) reviews.map { selector(it.ratings) }.average() else 0.0
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -358,7 +364,7 @@ private fun ReviewCard(review: Review) {
             modifier = Modifier.padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Categories.chunked(2).forEach { pair ->
+            reviewCategories().chunked(2).forEach { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     pair.forEach { (label, selector) ->
                         Row(

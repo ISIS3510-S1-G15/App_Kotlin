@@ -68,17 +68,6 @@ private val Green = Color(0xFF3A8C4F)
 
 private const val MAX_COMMENT = 300
 
-private val DietaryOptions = listOf("Vegan options", "Vegetarian options", "Gluten-free", "Lactose-free", "Nut-free", "Halal", "Kosher")
-
-private val RatingLabels = listOf(
-    "taste" to "Taste & Food Quality",
-    "attention" to "Service & Attention",
-    "price" to "Value for Money",
-    "options" to "Dietary Options"
-)
-
-private fun ratingLabel(v: Int) = listOf("", "Poor", "Fair", "Good", "Great", "Excellent").getOrElse(v) { "" }
-
 /** Encuesta de calificación del restaurante: 4 categorías con estrellas, dietas y comentario. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -88,6 +77,9 @@ fun WriteReviewView(
     onSubmit: (Review) -> Unit,
     onBack: () -> Unit
 ) {
+    val catalog = LocalCatalog.current
+    val dietaryChoices = catalog.labels("review_dietary_options")
+    val ratingLabels = catalog.options("review_categories").map { it.value to it.label }
     var ratings by remember { mutableStateOf(mapOf("taste" to 0, "attention" to 0, "price" to 0, "options" to 0)) }
     var dietaryOptions by remember { mutableStateOf(listOf<String>()) }
     var comment by remember { mutableStateOf("") }
@@ -144,7 +136,7 @@ fun WriteReviewView(
             Card {
                 CardTitle("Rate your experience", bottom = 16.dp)
                 Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                    RatingLabels.forEach { (key, label) ->
+                    ratingLabels.forEach { (key, label) ->
                         val value = ratings.getValue(key)
                         Column {
                             Row(
@@ -155,7 +147,7 @@ fun WriteReviewView(
                             ) {
                                 Text(text = label, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                                 if (value > 0) {
-                                    Text(text = ratingLabel(value), color = Orange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = catalog.label("review_rating_words", value.toString()).orEmpty(), color = Orange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                             StarRating(value = value, onChange = { ratings = ratings + (key to it) })
@@ -205,7 +197,7 @@ fun WriteReviewView(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    DietaryOptions.forEach { opt ->
+                    dietaryChoices.forEach { opt ->
                         val isSelected = opt in dietaryOptions
                         Text(
                             text = if (isSelected) "✓ $opt" else opt,

@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.uniandes.campuseats.data.avgCrowding
+import com.uniandes.campuseats.data.crowdingLevelValue
 import com.uniandes.campuseats.data.getCrowdingLevel
 import kotlin.math.roundToInt
 
@@ -30,6 +31,7 @@ private val BarOff = Color(0xFFD4CAC0)
 fun CrowdingBadge(reports: List<Int>, size: String, modifier: Modifier = Modifier) {
     val avg = avgCrowding(reports) ?: return
     val level = getCrowdingLevel(avg)
+    val levelLabel = LocalCatalog.current.label("crowding_levels", crowdingLevelValue(avg).toString()) ?: level.label
     val isSm = size == "sm"
 
     Row(
@@ -53,7 +55,7 @@ fun CrowdingBadge(reports: List<Int>, size: String, modifier: Modifier = Modifie
             gap = 1.5f
         )
         Text(
-            text = level.label,
+            text = levelLabel,
             color = level.color,
             fontSize = if (isSm) 9.sp else 11.sp,
             fontWeight = FontWeight.Bold

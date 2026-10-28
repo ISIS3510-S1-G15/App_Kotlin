@@ -20,6 +20,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,6 +41,8 @@ import com.uniandes.campuseats.analytics.AnalyticsViewModel
 import com.uniandes.campuseats.analytics.AppSection
 import com.uniandes.campuseats.analytics.SectionAction
 import com.uniandes.campuseats.analytics.SectionAnalyticsViewModel
+import com.uniandes.campuseats.data.MealRules
+import com.uniandes.campuseats.data.remote.applyRatingSummaries
 import com.uniandes.campuseats.auth.AuthUser
 import com.uniandes.campuseats.auth.AuthViewModel
 import com.uniandes.campuseats.data.AppDataStore
@@ -53,6 +56,9 @@ import com.uniandes.campuseats.ui.CrowdingModal
 import com.uniandes.campuseats.ui.DetailView
 import com.uniandes.campuseats.ui.HomeView
 import com.uniandes.campuseats.ui.LoadingView
+import com.uniandes.campuseats.ui.LocalCatalog
+import com.uniandes.campuseats.ui.LocalMealRules
+import com.uniandes.campuseats.ui.LocalRestaurants
 import com.uniandes.campuseats.ui.LoginView
 import com.uniandes.campuseats.ui.MapView
 import com.uniandes.campuseats.ui.ProfileView
@@ -78,6 +84,7 @@ class MainActivity : ComponentActivity() {
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
 private enum class Overlay { Detail, WriteReview, ReviewsList, Survey }
 
+private const val MAX_RECENT_SEARCHES = 5
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
@@ -135,6 +142,40 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     val reviews = remember { mutableStateListOf<Review>().apply { addAll(dataStore.loadReviews()) } }
     val crowding = remember { mutableStateMapOf<String, List<Int>>().apply { putAll(dataStore.loadCrowding()) } }
     var savedIds by remember { mutableStateOf(dataStore.loadSavedIds()) }
+    var restaurants by remember { mutableStateOf(services.restaurantRepository.cached()) }
+    var restaurantsResolved by remember { mutableStateOf(restaurants.isNotEmpty()) }
+    var recentSearches by remember { mutableStateOf(dataStore.loadRecentSearches()) }
+    var catalog by remember { mutableStateOf(services.catalogRepository.cached()) }
+    var catalogResolved by remember { mutableStateOf(!catalog.isEmpty) }
+
+    suspend fun refreshCatalog() {
+        val fetched = attemptOrNull { services.restaurantRepository.fetch() }?.takeIf { it.isNotEmpty() } ?: return
+        val summaries = attemptOrNull { services.reviewRepository.summaries() }.orEmpty()
+        restaurants = applyRatingSummaries(fetched, summaries)
+    }
+
+    suspend fun refreshReviews() {
+        val current = reviews.toList()
+        val merged = restaurants.flatMap { restaurant ->
+            attemptOrNull { services.reviewRepository.forRestaurant(restaurant.id) }
+                ?: current.filter { it.restaurantId == restaurant.id }
+        }
+        reviews.clear()
+        reviews.addAll(merged)
+        dataStore.saveReviews(merged)
+    }
+
+    suspend fun refreshCrowding() {
+        val fetched = attemptOrNull { services.occupancyRepository.fetchAll() } ?: return
+        crowding.clear()
+        crowding.putAll(fetched)
+        dataStore.saveCrowding(fetched)
+    }
+
+    fun recordRecentSearch(name: String) {
+        recentSearches = (listOf(name) + recentSearches.filter { it != name }).take(MAX_RECENT_SEARCHES)
+        dataStore.saveRecentSearches(recentSearches)
+    }
 
     LaunchedEffect(user.id) {
         attemptOrNull { services.profileRepository.fetch() }?.let { remote ->
@@ -144,10 +185,16 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
             surveyDone = true
         }
         profileResolved = true
+        refreshCatalog()
+        restaurantsResolved = true
+        attemptOrNull { services.catalogRepository.fetch() }?.takeIf { !it.isEmpty }?.let { catalog = it }
+        catalogResolved = true
         attemptOrNull { services.savedRepository.fetch() }?.let {
             savedIds = it
             dataStore.saveSavedIds(it)
         }
+        refreshReviews()
+        refreshCrowding()
     }
 
     // Sensor GPS: se pide el permiso al terminar el onboarding y se comparte con las pantallas
@@ -156,7 +203,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         if (surveyDone && !userLocation.hasPermission) userLocation.requestPermission()
     }
 
-    if (!profileResolved) {
+    if (!profileResolved || !restaurantsResolved || !catalogResolved) {
         LoadingView()
         return
     }
@@ -255,163 +302,187 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         ?.let { r -> reviews.filter { it.restaurantId == r.id } }
         .orEmpty()
 
-    Scaffold(
-        bottomBar = {
-            if (overlay != Overlay.Survey) {
-                NavigationBar(containerColor = Color.White) {
-                    val unselectedColor = Color.Gray
-                    val selectedColor = Color(0xFFE8440A) // Naranja de Campus Eats
-                    val tabs = listOf(
-                        Icons.Default.Home to "Discover",
-                        Icons.Default.Search to "Search",
-                        Icons.Default.Map to "Map",
-                        Icons.Default.Bookmark to "Saved",
-                        Icons.Default.Person to "Profile"
+    val mealRules = remember(catalog) { MealRules(catalog) }
+    CompositionLocalProvider(LocalRestaurants provides restaurants, LocalCatalog provides catalog, LocalMealRules provides mealRules) {
+        Scaffold(
+            bottomBar = {
+                if (overlay != Overlay.Survey) {
+                    NavigationBar(containerColor = Color.White) {
+                        val unselectedColor = Color.Gray
+                        val selectedColor = Color(0xFFE8440A) // Naranja de Campus Eats
+                        val tabs = listOf(
+                            Icons.Default.Home to "Discover",
+                            Icons.Default.Search to "Search",
+                            Icons.Default.Map to "Map",
+                            Icons.Default.Bookmark to "Saved",
+                            Icons.Default.Person to "Profile"
+                        )
+                        tabs.forEachIndexed { index, (icon, label) ->
+                            val active = currentTab == index && overlay == null
+                            NavigationBarItem(
+                                selected = active,
+                                onClick = { selectTab(index) },
+                                icon = { Icon(icon, label, tint = if (active) selectedColor else unselectedColor) },
+                                label = { Text(label, color = if (active) selectedColor else unselectedColor) }
+                            )
+                        }
+                    }
+                }
+            }
+        ) { paddingValues ->
+            Box(modifier = Modifier.padding(paddingValues)) {
+                val restaurant = selectedRestaurant
+                when {
+                    overlay == Overlay.Detail && restaurant != null -> DetailView(
+                        restaurant = restaurant,
+                        reviews = restaurantReviews,
+                        crowdingReports = crowding[restaurant.id].orEmpty(),
+                        isSaved = restaurant.id in savedIds,
+                        distanceMeters = userLocation.location?.let { distanceMeters(it, restaurant) },
+                        userLocation = userLocation.location,
+                        onToggleSave = { toggleSaved(restaurant.id) },
+                        onBack = ::closeAll,
+                        onWriteReview = {
+                            sections.onInteraction(AppSection.Details, SectionAction.ReviewWriteOpened)
+                            overlayStack.add(Overlay.WriteReview)
+                        },
+                        onSeeReviews = {
+                            sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
+                            overlayStack.add(Overlay.ReviewsList)
+                        },
+                        onGetDirections = {
+                            sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
+                            analytics.onGoDecision(restaurant.id)
+                        }
                     )
-                    tabs.forEachIndexed { index, (icon, label) ->
-                        val active = currentTab == index && overlay == null
-                        NavigationBarItem(
-                            selected = active,
-                            onClick = { selectTab(index) },
-                            icon = { Icon(icon, label, tint = if (active) selectedColor else unselectedColor) },
-                            label = { Text(label, color = if (active) selectedColor else unselectedColor) }
+
+                    overlay == Overlay.WriteReview && restaurant != null -> WriteReviewView(
+                        restaurant = restaurant,
+                        authorName = profile.name,
+                        onSubmit = { review ->
+                            scope.launch {
+                                try {
+                                    services.reviewRepository.submit(review)
+                                    refreshReviews()
+                                    refreshCatalog()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not submit your review", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        onBack = ::popOverlay
+                    )
+
+                    overlay == Overlay.ReviewsList && restaurant != null -> ReviewsListView(
+                        restaurant = restaurant,
+                        reviews = restaurantReviews,
+                        onBack = ::popOverlay,
+                        onWriteReview = {
+                            popOverlay()
+                            overlayStack.add(Overlay.WriteReview)
+                        }
+                    )
+
+                    overlay == Overlay.Survey -> SurveyView(
+                        initialName = profile.name,
+                        onComplete = { answers ->
+                            val updated = answers.copy(name = answers.name.ifBlank { user.name })
+                            analytics.onProfileSaved(profile, updated)
+                            profileStore.save(updated)
+                            profile = updated
+                            scope.launch { attemptOrNull { services.profileRepository.save(updated) } }
+                            popOverlay()
+                        }
+                    )
+
+                    else -> when (currentTab) {
+                        0 -> HomeView(
+                            onSelect = requestDetail,
+                            onOpenProfile = { selectTab(PROFILE_TAB) },
+                            profile = profile,
+                            crowding = crowding,
+                            savedIds = savedIds,
+                            reviews = reviews,
+                            userLocation = userLocation.location,
+                            onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Home) },
+                            onFilterSheetOpened = { sections.onSectionShown(AppSection.Filters) },
+                            onFilterSheetClosed = { sections.onSectionLeft(AppSection.Filters) },
+                            onFiltersApplied = {
+                                sections.onInteraction(AppSection.Filters, SectionAction.FiltersApplied)
+                            },
+                            onFiltersCleared = {
+                                sections.onInteraction(AppSection.Filters, SectionAction.FiltersCleared)
+                            }
+                        )
+                        1 -> SearchView(
+                            onSelect = {
+                                recordRecentSearch(it.name)
+                                requestDetail(it)
+                            },
+                            crowding = crowding,
+                            userLocation = userLocation.location,
+                            onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Search) },
+                            recentSearches = recentSearches,
+                            onClearRecent = {
+                                recentSearches = emptyList()
+                                dataStore.saveRecentSearches(emptyList())
+                            }
+                        )
+                        MAP_TAB -> MapView(
+                            onSelect = {
+                                sections.onInteraction(AppSection.Map, SectionAction.RestaurantSelected)
+                                requestDetail(it)
+                            },
+                            crowding = crowding,
+                            userLocation = userLocation.location,
+                            hasLocationPermission = userLocation.hasPermission,
+                            onRetryLocation = userLocation.requestPermission,
+                            onFilterUsed = {
+                                sections.onInteraction(AppSection.Map, SectionAction.FilterChipChanged)
+                                analytics.onFilterUsed(it, AnalyticsScreen.Map)
+                            },
+                            onMarkerSelected = {
+                                sections.onInteraction(AppSection.Map, SectionAction.MarkerSelected)
+                            }
+                        )
+                        FAVORITES_TAB -> SavedView(
+                            onSelect = {
+                                sections.onInteraction(AppSection.Favorites, SectionAction.SavedItemSelected)
+                                requestDetail(it)
+                            },
+                            crowding = crowding,
+                            savedIds = savedIds,
+                            userLocation = userLocation.location
+                        )
+                        PROFILE_TAB -> ProfileView(
+                            profile = profile,
+                            userEmail = user.email,
+                            onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
+                            onLogout = onLogout,
+                            onBack = { selectTab(0) }
                         )
                     }
                 }
-            }
-        }
-    ) { paddingValues ->
-        Box(modifier = Modifier.padding(paddingValues)) {
-            val restaurant = selectedRestaurant
-            when {
-                overlay == Overlay.Detail && restaurant != null -> DetailView(
-                    restaurant = restaurant,
-                    reviews = restaurantReviews,
-                    crowdingReports = crowding[restaurant.id].orEmpty(),
-                    isSaved = restaurant.id in savedIds,
-                    distanceMeters = userLocation.location?.let { distanceMeters(it, restaurant) },
-                    userLocation = userLocation.location,
-                    onToggleSave = { toggleSaved(restaurant.id) },
-                    onBack = ::closeAll,
-                    onWriteReview = {
-                        sections.onInteraction(AppSection.Details, SectionAction.ReviewWriteOpened)
-                        overlayStack.add(Overlay.WriteReview)
-                    },
-                    onSeeReviews = {
-                        sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
-                        overlayStack.add(Overlay.ReviewsList)
-                    },
-                    onGetDirections = {
-                        sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
-                        analytics.onGoDecision(restaurant.id)
+
+                // Modal de ocupación: flota sobre la tab antes de abrir el detalle
+                pendingRestaurant?.let { pending ->
+                    if (overlay == null) {
+                        CrowdingModal(
+                            restaurant = pending,
+                            onSubmit = { level ->
+                                scope.launch {
+                                    attemptOrNull { services.occupancyRepository.report(pending.id, level) }?.let {
+                                        crowding[pending.id] = it
+                                        dataStore.saveCrowding(crowding)
+                                    }
+                                }
+                                commitDetail(pending)
+                            },
+                            onSkip = { commitDetail(pending) }
+                        )
                     }
-                )
-
-                overlay == Overlay.WriteReview && restaurant != null -> WriteReviewView(
-                    restaurant = restaurant,
-                    authorName = profile.name,
-                    onSubmit = {
-                        reviews.add(0, it)
-                        dataStore.saveReviews(reviews)
-                    },
-                    onBack = ::popOverlay
-                )
-
-                overlay == Overlay.ReviewsList && restaurant != null -> ReviewsListView(
-                    restaurant = restaurant,
-                    reviews = restaurantReviews,
-                    onBack = ::popOverlay,
-                    onWriteReview = {
-                        popOverlay()
-                        overlayStack.add(Overlay.WriteReview)
-                    }
-                )
-
-                overlay == Overlay.Survey -> SurveyView(
-                    initialName = profile.name,
-                    onComplete = { answers ->
-                        val updated = answers.copy(name = answers.name.ifBlank { user.name })
-                        analytics.onProfileSaved(profile, updated)
-                        profileStore.save(updated)
-                        profile = updated
-                        scope.launch { attemptOrNull { services.profileRepository.save(updated) } }
-                        popOverlay()
-                    }
-                )
-
-                else -> when (currentTab) {
-                    0 -> HomeView(
-                        onSelect = requestDetail,
-                        onOpenProfile = { selectTab(PROFILE_TAB) },
-                        profile = profile,
-                        crowding = crowding,
-                        savedIds = savedIds,
-                        reviews = reviews,
-                        userLocation = userLocation.location,
-                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Home) },
-                        onFilterSheetOpened = { sections.onSectionShown(AppSection.Filters) },
-                        onFilterSheetClosed = { sections.onSectionLeft(AppSection.Filters) },
-                        onFiltersApplied = {
-                            sections.onInteraction(AppSection.Filters, SectionAction.FiltersApplied)
-                        },
-                        onFiltersCleared = {
-                            sections.onInteraction(AppSection.Filters, SectionAction.FiltersCleared)
-                        }
-                    )
-                    1 -> SearchView(
-                        onSelect = requestDetail,
-                        crowding = crowding,
-                        userLocation = userLocation.location,
-                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Search) }
-                    )
-                    MAP_TAB -> MapView(
-                        onSelect = {
-                            sections.onInteraction(AppSection.Map, SectionAction.RestaurantSelected)
-                            requestDetail(it)
-                        },
-                        crowding = crowding,
-                        userLocation = userLocation.location,
-                        hasLocationPermission = userLocation.hasPermission,
-                        onRetryLocation = userLocation.requestPermission,
-                        onFilterUsed = {
-                            sections.onInteraction(AppSection.Map, SectionAction.FilterChipChanged)
-                            analytics.onFilterUsed(it, AnalyticsScreen.Map)
-                        },
-                        onMarkerSelected = {
-                            sections.onInteraction(AppSection.Map, SectionAction.MarkerSelected)
-                        }
-                    )
-                    FAVORITES_TAB -> SavedView(
-                        onSelect = {
-                            sections.onInteraction(AppSection.Favorites, SectionAction.SavedItemSelected)
-                            requestDetail(it)
-                        },
-                        crowding = crowding,
-                        savedIds = savedIds,
-                        userLocation = userLocation.location
-                    )
-                    PROFILE_TAB -> ProfileView(
-                        profile = profile,
-                        userEmail = user.email,
-                        onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
-                        onLogout = onLogout,
-                        onBack = { selectTab(0) }
-                    )
-                }
-            }
-
-            // Modal de ocupación: flota sobre la tab antes de abrir el detalle
-            pendingRestaurant?.let { pending ->
-                if (overlay == null) {
-                    CrowdingModal(
-                        restaurant = pending,
-                        onSubmit = { level ->
-                            crowding[pending.id] = crowding[pending.id].orEmpty() + level
-                            dataStore.saveCrowding(crowding)
-                            commitDetail(pending)
-                        },
-                        onSkip = { commitDetail(pending) }
-                    )
                 }
             }
         }

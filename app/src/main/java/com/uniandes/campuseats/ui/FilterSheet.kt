@@ -41,9 +41,6 @@ private val Outline = Color(0xFFE8E0D4)
 private val LightMuted = Color(0xFFB8AC9E)
 private val Green = Color(0xFF3A8C4F)
 
-private val PriceOptions = listOf("$", "$$", "$$$")
-private val RatingOptions = listOf(0.0 to "Any", 4.0 to "4.0+", 4.5 to "4.5+")
-
 /** Filtros extra de la lista de Home (se suman a la categoría elegida). */
 data class HomeFilters(
     val openNow: Boolean = false,
@@ -67,6 +64,11 @@ fun FilterSheet(
     onDismiss: () -> Unit,
     onClear: () -> Unit = {}
 ) {
+    val catalog = LocalCatalog.current
+    val priceOptions = catalog.labels("filter_prices")
+    val ratingOptions = catalog.options("filter_ratings").mapNotNull { option ->
+        option.value.toDoubleOrNull()?.let { it to option.label }
+    }
     var draft by remember { mutableStateOf(initial) }
     val sheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
 
@@ -150,7 +152,7 @@ fun FilterSheet(
 
             SectionLabel("Price range")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PriceOptions.forEach { price ->
+                priceOptions.forEach { price ->
                     val active = price in draft.prices
                     OptionChip(text = price, active = active, modifier = Modifier.weight(1f)) {
                         draft = draft.copy(prices = if (active) draft.prices - price else draft.prices + price)
@@ -160,7 +162,7 @@ fun FilterSheet(
 
             SectionLabel("Minimum rating")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RatingOptions.forEach { (value, label) ->
+                ratingOptions.forEach { (value, label) ->
                     OptionChip(
                         text = if (value > 0) "★ $label" else label,
                         active = draft.minRating == value,

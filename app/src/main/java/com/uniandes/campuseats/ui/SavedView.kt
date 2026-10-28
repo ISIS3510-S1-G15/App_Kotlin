@@ -48,7 +48,6 @@ import android.location.Location
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.locationLabel
 import com.uniandes.campuseats.data.Restaurant
-import com.uniandes.campuseats.data.restaurants
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 
 private val Cream = Color(0xFFFBF5EE)
@@ -67,8 +66,6 @@ private const val PLUS_PATH = "M12 5V19M5 12H19"
 private const val BOOKMARK_PATH = "M5 3H19C19.6 3 20 3.4 20 4V21L12 17L4 21V4C4 3.4 4.4 3 5 3Z"
 private const val PIN_PATH = "M12 2C8.7 2 6 4.7 6 8C6 13 12 22 12 22C12 22 18 13 18 8C18 4.7 15.3 2 12 2Z"
 private const val STAR_PATH = "M12 2L15.1 8.3L22 9.3L17 14.2L18.2 21L12 17.8L5.8 21L7 14.2L2 9.3L8.9 8.3L12 2Z"
-
-private val DIETARY = listOf("Vegan", "Gluten-free", "Halal", "Vegetarian")
 
 @Composable
 private fun PathIcon(
@@ -110,6 +107,8 @@ fun SavedView(
     savedIds: Set<String>,
     userLocation: Location?
 ) {
+    val restaurants = LocalRestaurants.current
+    val dietaryOptions = LocalCatalog.current.labels("saved_dietary_filters")
     var dietaryFilters by remember { mutableStateOf(listOf<String>()) }
     val saved = restaurants.filter { it.id in savedIds }
 
@@ -175,7 +174,7 @@ fun SavedView(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DIETARY.chunked(2).forEach { rowItems ->
+                dietaryOptions.chunked(2).forEach { rowItems ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
