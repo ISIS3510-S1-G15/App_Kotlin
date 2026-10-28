@@ -28,6 +28,10 @@ class AnalyticsViewModel(private val repository: AnalyticsRepository) : ViewMode
         repository.logProfileEdits(old, updated)
     }
 
+    fun onTagClick(tags: List<String>) {
+        repository.logTagClicks(tags)
+    }
+
     companion object {
         fun factory(services: AppServices): ViewModelProvider.Factory = viewModelFactory {
             initializer {
