@@ -20,6 +20,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -36,6 +37,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.uniandes.campuseats.analytics.AnalyticsScreen
 import com.uniandes.campuseats.analytics.AnalyticsViewModel
+import com.uniandes.campuseats.analytics.AppSection
+import com.uniandes.campuseats.analytics.SectionAction
+import com.uniandes.campuseats.analytics.SectionAnalyticsViewModel
 import com.uniandes.campuseats.auth.AuthUser
 import com.uniandes.campuseats.auth.AuthViewModel
 import com.uniandes.campuseats.data.AppDataStore
@@ -74,6 +78,8 @@ class MainActivity : ComponentActivity() {
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
 private enum class Overlay { Detail, WriteReview, ReviewsList, Survey }
 
+private const val MAP_TAB = 2
+private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
 
 @Composable
@@ -113,6 +119,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     val profileStore = remember { ProfileStore(context.applicationContext) }
     val dataStore = remember { AppDataStore(context.applicationContext) }
     val analytics: AnalyticsViewModel = viewModel(factory = AnalyticsViewModel.factory(services))
+    val sections: SectionAnalyticsViewModel = viewModel(factory = SectionAnalyticsViewModel.factory(services))
 
     var profileResolved by remember { mutableStateOf(profileStore.isSurveyDone) }
     var surveyDone by remember { mutableStateOf(profileStore.isSurveyDone) }
@@ -200,6 +207,11 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                 }
                 savedIds = confirmed
                 dataStore.saveSavedIds(confirmed)
+                sections.onInteraction(
+                    AppSection.Favorites,
+                    if (wasSaved) SectionAction.FavoriteRemoved else SectionAction.FavoriteAdded,
+                    visitSection = AppSection.Details
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -222,6 +234,14 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         pendingRestaurant = null
         currentTab = tab
     }
+
+    val mapVisible = overlay == null && currentTab == MAP_TAB
+    val favoritesVisible = overlay == null && currentTab == FAVORITES_TAB
+    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList
+
+    SectionVisibilityEffect(AppSection.Map, mapVisible, sections)
+    SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
+    SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
 
     BackHandler(enabled = pendingRestaurant != null || overlayStack.isNotEmpty()) {
         when {
@@ -273,9 +293,18 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                     userLocation = userLocation.location,
                     onToggleSave = { toggleSaved(restaurant.id) },
                     onBack = ::closeAll,
-                    onWriteReview = { overlayStack.add(Overlay.WriteReview) },
-                    onSeeReviews = { overlayStack.add(Overlay.ReviewsList) },
-                    onGetDirections = { analytics.onGoDecision(restaurant.id) }
+                    onWriteReview = {
+                        sections.onInteraction(AppSection.Details, SectionAction.ReviewWriteOpened)
+                        overlayStack.add(Overlay.WriteReview)
+                    },
+                    onSeeReviews = {
+                        sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
+                        overlayStack.add(Overlay.ReviewsList)
+                    },
+                    onGetDirections = {
+                        sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
+                        analytics.onGoDecision(restaurant.id)
+                    }
                 )
 
                 overlay == Overlay.WriteReview && restaurant != null -> WriteReviewView(
@@ -319,7 +348,15 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         savedIds = savedIds,
                         reviews = reviews,
                         userLocation = userLocation.location,
-                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Home) }
+                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Home) },
+                        onFilterSheetOpened = { sections.onSectionShown(AppSection.Filters) },
+                        onFilterSheetClosed = { sections.onSectionLeft(AppSection.Filters) },
+                        onFiltersApplied = {
+                            sections.onInteraction(AppSection.Filters, SectionAction.FiltersApplied)
+                        },
+                        onFiltersCleared = {
+                            sections.onInteraction(AppSection.Filters, SectionAction.FiltersCleared)
+                        }
                     )
                     1 -> SearchView(
                         onSelect = requestDetail,
@@ -327,16 +364,28 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         userLocation = userLocation.location,
                         onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Search) }
                     )
-                    2 -> MapView(
-                        onSelect = requestDetail,
+                    MAP_TAB -> MapView(
+                        onSelect = {
+                            sections.onInteraction(AppSection.Map, SectionAction.RestaurantSelected)
+                            requestDetail(it)
+                        },
                         crowding = crowding,
                         userLocation = userLocation.location,
                         hasLocationPermission = userLocation.hasPermission,
                         onRetryLocation = userLocation.requestPermission,
-                        onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Map) }
+                        onFilterUsed = {
+                            sections.onInteraction(AppSection.Map, SectionAction.FilterChipChanged)
+                            analytics.onFilterUsed(it, AnalyticsScreen.Map)
+                        },
+                        onMarkerSelected = {
+                            sections.onInteraction(AppSection.Map, SectionAction.MarkerSelected)
+                        }
                     )
-                    3 -> SavedView(
-                        onSelect = requestDetail,
+                    FAVORITES_TAB -> SavedView(
+                        onSelect = {
+                            sections.onInteraction(AppSection.Favorites, SectionAction.SavedItemSelected)
+                            requestDetail(it)
+                        },
                         crowding = crowding,
                         savedIds = savedIds,
                         userLocation = userLocation.location
@@ -366,5 +415,15 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SectionVisibilityEffect(section: AppSection, visible: Boolean, sections: SectionAnalyticsViewModel) {
+    LaunchedEffect(visible) {
+        if (visible) sections.onSectionShown(section) else sections.onSectionLeft(section)
+    }
+    DisposableEffect(Unit) {
+        onDispose { sections.onSectionLeft(section) }
     }
 }

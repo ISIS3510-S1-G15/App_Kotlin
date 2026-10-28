@@ -33,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -93,6 +94,10 @@ fun HomeView(
     reviews: List<Review>,
     userLocation: Location?,
     onFilterUsed: (String) -> Unit = {},
+    onFilterSheetOpened: () -> Unit = {},
+    onFilterSheetClosed: () -> Unit = {},
+    onFiltersApplied: () -> Unit = {},
+    onFiltersCleared: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var search by remember { mutableStateOf("") }
@@ -135,7 +140,20 @@ fun HomeView(
     val mealSlot = mealSlotFor(hour)
     val usualMealTime = mealSlot in profile.usualMealTimes
 
-    BackHandler(enabled = showFilters) { showFilters = false }
+    val openFilterSheet = {
+        showFilters = true
+        onFilterSheetOpened()
+    }
+    val closeFilterSheet = {
+        showFilters = false
+        onFilterSheetClosed()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { if (showFilters) onFilterSheetClosed() }
+    }
+
+    BackHandler(enabled = showFilters) { closeFilterSheet() }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -312,7 +330,7 @@ fun HomeView(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(if (activeFilters > 0) Orange else Color.Transparent)
-                            .clickable { showFilters = true }
+                            .clickable { openFilterSheet() }
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -374,9 +392,11 @@ fun HomeView(
                 countFor = { draft -> restaurants.count { matches(it, draft) } },
                 onApply = {
                     filters = it
-                    showFilters = false
+                    onFiltersApplied()
+                    closeFilterSheet()
                 },
-                onDismiss = { showFilters = false }
+                onClear = onFiltersCleared,
+                onDismiss = closeFilterSheet
             )
         }
     }

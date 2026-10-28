@@ -64,7 +64,8 @@ fun FilterSheet(
     initial: HomeFilters,
     countFor: (HomeFilters) -> Int,
     onApply: (HomeFilters) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onClear: () -> Unit = {}
 ) {
     var draft by remember { mutableStateOf(initial) }
     val sheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
@@ -123,7 +124,10 @@ fun FilterSheet(
                     color = if (draft.activeCount > 0) Orange else LightMuted,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable { draft = HomeFilters() }
+                    modifier = Modifier.clickable {
+                        draft = HomeFilters()
+                        onClear()
+                    }
                 )
             }
 
