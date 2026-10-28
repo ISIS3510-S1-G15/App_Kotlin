@@ -350,9 +350,10 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                             sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
                             overlayStack.add(Overlay.ReviewsList)
                         },
-                        onGetDirections = {
+                        onGetDirections = { tags ->
                             sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
                             analytics.onGoDecision(restaurant.id)
+                            analytics.onTagClick(tags)
                         }
                     )
 

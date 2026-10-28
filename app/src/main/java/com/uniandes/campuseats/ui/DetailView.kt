@@ -96,7 +96,7 @@ fun DetailView(
     onBack: () -> Unit,
     onWriteReview: () -> Unit,
     onSeeReviews: () -> Unit,
-    onGetDirections: () -> Unit
+    onGetDirections: (tags: List<String>) -> Unit
 ) {
     val r = restaurant
     val context = LocalContext.current
@@ -529,7 +529,7 @@ fun DetailView(
                         .clip(RoundedCornerShape(16.dp))
                         .background(Ink)
                         .clickable {
-                            onGetDirections()
+                            onGetDirections(restaurant.tags)
                             val uri = Uri.parse(
                                 "https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}&travelmode=walking"
                             )

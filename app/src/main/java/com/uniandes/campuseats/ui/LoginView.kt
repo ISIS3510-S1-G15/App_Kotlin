@@ -61,7 +61,7 @@ fun LoginView(
             .background(Cream)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 48.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)
     ) {
         Text(
             text = "Campus Eats",

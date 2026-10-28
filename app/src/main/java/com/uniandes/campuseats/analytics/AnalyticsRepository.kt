@@ -30,10 +30,16 @@ class AnalyticsRepository(
         }
     }
 
+    fun logTagClicks(tags: List<String>) {
+        if (tags.isEmpty()) return
+        gateway.send(TAG_CLICK_PATH, mapOf("tags" to tags))
+    }
+
     companion object {
         const val FILTER_USAGE_PATH = "/analytics/filter-usage"
         const val OCCUPANCY_PATH = "/analytics/occupancy-event"
         const val PROFILE_EDIT_PATH = "/analytics/profile-edit"
+        const val TAG_CLICK_PATH = "/analytics/tag-click"
         const val EVENT_CHECKED = "occupancy_checked"
         const val EVENT_GO_DECISION = "go_decision"
     }
