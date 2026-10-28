@@ -116,7 +116,8 @@ fun MapView(
     userLocation: Location?,
     hasLocationPermission: Boolean = true,
     onRetryLocation: () -> Unit = {},
-    onFilterUsed: (String) -> Unit = {}
+    onFilterUsed: (String) -> Unit = {},
+    onMarkerSelected: () -> Unit = {}
 ) {
     var selected by remember { mutableStateOf<Restaurant?>(null) }
     var filter by remember { mutableStateOf("all") }
@@ -297,6 +298,7 @@ fun MapView(
 
                         marker.setOnMarkerClickListener { _, _ ->
                             selected = if (isSelected) null else r
+                            if (!isSelected) onMarkerSelected()
                             true
                         }
 
