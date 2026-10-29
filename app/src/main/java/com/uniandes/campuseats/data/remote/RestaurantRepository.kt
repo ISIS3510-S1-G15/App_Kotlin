@@ -1,29 +1,16 @@
 package com.uniandes.campuseats.data.remote
 
-import android.content.Context
-import androidx.core.content.edit
 import com.uniandes.campuseats.R
 import com.uniandes.campuseats.data.MenuItem
 import com.uniandes.campuseats.data.MenuSection
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.net.RemoteApi
+import com.uniandes.campuseats.net.attemptOrNull
 import org.json.JSONObject
 
 interface RestaurantCache {
-    fun load(): String?
-    fun save(raw: String)
-}
-
-class SharedPrefsRestaurantCache(context: Context) : RestaurantCache {
-    private val prefs = context.getSharedPreferences("campus_eats_restaurants", Context.MODE_PRIVATE)
-
-    override fun load(): String? = prefs.getString(KEY, null)
-
-    override fun save(raw: String) = prefs.edit { putString(KEY, raw) }
-
-    private companion object {
-        const val KEY = "restaurants_json"
-    }
+    suspend fun load(): String?
+    suspend fun save(raw: String)
 }
 
 fun bundledImageFor(key: String): Int? = when (key) {
@@ -82,9 +69,9 @@ class RestaurantRepository(
     private val imageFor: (String) -> Int? = ::bundledImageFor
 ) {
 
-    fun cached(): List<Restaurant> = runCatching {
+    suspend fun cached(): List<Restaurant> = attemptOrNull {
         cache.load()?.let { parseRestaurants(JSONObject(it), imageFor) }
-    }.getOrNull().orEmpty()
+    }.orEmpty()
 
     suspend fun fetch(): List<Restaurant> {
         val json = api.get("/restaurants")

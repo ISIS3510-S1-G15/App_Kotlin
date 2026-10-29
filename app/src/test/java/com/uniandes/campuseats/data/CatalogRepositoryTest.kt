@@ -27,8 +27,8 @@ class CatalogRepositoryTest {
     )
 
     private class MemoryCache(var raw: String? = null) : CatalogCache {
-        override fun load() = raw
-        override fun save(raw: String) {
+        override suspend fun load() = raw
+        override suspend fun save(raw: String) {
             this.raw = raw
         }
     }
@@ -61,7 +61,7 @@ class CatalogRepositoryTest {
     }
 
     @Test
-    fun corruptCacheYieldsEmptyCatalog() {
+    fun corruptCacheYieldsEmptyCatalog() = runTest {
         assertTrue(CatalogRepository(FakeApi(null), MemoryCache("not json")).cached().isEmpty)
     }
 }
