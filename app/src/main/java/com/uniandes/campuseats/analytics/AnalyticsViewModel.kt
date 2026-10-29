@@ -9,8 +9,16 @@ import com.uniandes.campuseats.data.Profile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
-class AnalyticsViewModel(private val repository: AnalyticsRepository) : ViewModel() {
+class AnalyticsViewModel(
+    private val repository: AnalyticsRepository,
+    private val scope: CoroutineScope? = null
+) : ViewModel() {
+
+    override fun onCleared() {
+        scope?.cancel()
+    }
 
     fun onFilterUsed(filter: String, screen: AnalyticsScreen) {
         repository.logFilterUsed(filter, screen)
@@ -35,11 +43,9 @@ class AnalyticsViewModel(private val repository: AnalyticsRepository) : ViewMode
     companion object {
         fun factory(services: AppServices): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val gateway = AnalyticsGateway(
-                    services.analyticsTransport,
-                    CoroutineScope(SupervisorJob() + Dispatchers.IO)
-                )
-                AnalyticsViewModel(AnalyticsRepository(gateway) { InstallId.get(services.appContext) })
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+                val gateway = AnalyticsGateway(services.analyticsTransport, scope)
+                AnalyticsViewModel(AnalyticsRepository(gateway) { InstallId.get(services.appContext) }, scope)
             }
         }
     }

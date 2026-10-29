@@ -4,8 +4,10 @@ import androidx.room.withTransaction
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.ReviewRatings
+import com.uniandes.campuseats.data.remote.ProfileLocalSource
+import com.uniandes.campuseats.data.remote.StoredProfile
 
-class LocalStore(private val database: AppDatabase) {
+class LocalStore(private val database: AppDatabase) : ProfileLocalSource {
 
     private val dao = database.dao()
 
@@ -50,10 +52,18 @@ class LocalStore(private val database: AppDatabase) {
         }
     }
 
-    suspend fun loadProfile(): Profile? = dao.profile()?.toProfile()
+    override suspend fun loadProfileRecord(): StoredProfile? =
+        dao.profile()?.let { StoredProfile(it.toProfile(), it.pendingSync) }
 
-    suspend fun saveProfile(profile: Profile) {
-        dao.upsertProfile(profile.toEntity())
+    override suspend fun saveProfile(profile: Profile, pendingSync: Boolean) {
+        dao.upsertProfile(profile.toEntity().copy(pendingSync = pendingSync))
+    }
+
+    override suspend fun markProfileSynced(profile: Profile) {
+        database.withTransaction {
+            val current = dao.profile() ?: return@withTransaction
+            if (current.toProfile() == profile) dao.upsertProfile(current.copy(pendingSync = false))
+        }
     }
 
     suspend fun clearUserData() {

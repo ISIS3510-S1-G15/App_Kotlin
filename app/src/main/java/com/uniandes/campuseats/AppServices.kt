@@ -12,6 +12,7 @@ import com.uniandes.campuseats.data.local.RoomDocumentCache
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.OccupancyRepository
 import com.uniandes.campuseats.data.remote.ProfileRepository
+import com.uniandes.campuseats.data.remote.ProfileSynchronizer
 import com.uniandes.campuseats.data.remote.RestaurantRepository
 import com.uniandes.campuseats.data.remote.ReviewRepository
 import com.uniandes.campuseats.data.remote.SavedRepository
@@ -28,6 +29,7 @@ class AppServices private constructor(val appContext: Context) {
     val api: RemoteApi = HttpRemoteApi(BuildConfig.API_BASE_URL) { sessionStore.token }
     val authRepository = AuthRepository(api, sessionStore)
     val profileRepository = ProfileRepository(api)
+    val profileSynchronizer = ProfileSynchronizer(localStore, profileRepository)
     val savedRepository = SavedRepository(api)
     val restaurantRepository = RestaurantRepository(api, documentCache)
     val reviewRepository = ReviewRepository(api, documentCache)

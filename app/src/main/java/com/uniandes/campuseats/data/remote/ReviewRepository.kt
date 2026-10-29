@@ -9,8 +9,14 @@ import com.uniandes.campuseats.data.cache.CacheTtl
 import com.uniandes.campuseats.data.cache.DocumentCache
 import com.uniandes.campuseats.net.RemoteApi
 import com.uniandes.campuseats.net.attemptOrNull
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 
+private const val REVIEW_PARALLELISM = 4
 private const val MAX_COMMENT = 300
 private const val MAX_DIETARY_OPTIONS = 10
 private const val DATE_LENGTH = 10
@@ -87,6 +93,19 @@ class ReviewRepository(
     suspend fun revalidate(restaurantId: String, force: Boolean = false): List<Review>? {
         val fresh = !force && policy.isFreshOrFalse(cache, CacheKeys.reviews(restaurantId), CacheTtl.REVIEWS)
         return if (fresh) null else forRestaurant(restaurantId)
+    }
+
+    suspend fun revalidateAll(
+        restaurantIds: List<String>,
+        force: Boolean = false,
+        parallelism: Int = REVIEW_PARALLELISM
+    ): Map<String, List<Review>> {
+        val gate = Semaphore(parallelism)
+        return coroutineScope {
+            restaurantIds
+                .map { id -> async { gate.withPermit { id to attemptOrNull { revalidate(id, force) } } } }
+                .awaitAll()
+        }.mapNotNull { (id, reviews) -> reviews?.let { id to it } }.toMap()
     }
 
     suspend fun invalidate(restaurantId: String) {

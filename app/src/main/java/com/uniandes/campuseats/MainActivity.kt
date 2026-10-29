@@ -55,6 +55,7 @@ import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.findLifecycleOwner
 import com.uniandes.campuseats.sensor.rememberUserLocation
+import com.uniandes.campuseats.ui.ConnectionErrorView
 import com.uniandes.campuseats.ui.CrowdingModal
 import com.uniandes.campuseats.ui.DetailView
 import com.uniandes.campuseats.ui.HomeView
@@ -71,6 +72,7 @@ import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -152,6 +154,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     var catalogResolved by remember { mutableStateOf(false) }
 
     var startupDone by remember { mutableStateOf(false) }
+    var loadFailed by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
 
     suspend fun refreshRestaurants(force: Boolean = false) {
@@ -168,13 +171,10 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
 
     suspend fun refreshReviews(force: Boolean = false) {
         val current = reviews.toList()
-        var changed = false
-        val merged = restaurants.flatMap { restaurant ->
-            val fetched = attemptOrNull { services.reviewRepository.revalidate(restaurant.id, force) }
-            if (fetched != null) changed = true
-            fetched ?: current.filter { it.restaurantId == restaurant.id }
-        }
-        if (!changed) return
+        val ids = restaurants.map { it.id }
+        val fetched = services.reviewRepository.revalidateAll(ids, force)
+        if (fetched.isEmpty()) return
+        val merged = ids.flatMap { id -> fetched[id] ?: current.filter { it.restaurantId == id } }
         reviews.clear()
         reviews.addAll(merged)
         localStore.saveReviews(merged)
@@ -191,10 +191,14 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         if (refreshing) return
         refreshing = true
         try {
-            refreshRestaurants()
-            refreshCatalog()
-            refreshReviews()
-            refreshCrowding()
+            coroutineScope {
+                launch { refreshRestaurants() }
+                launch { refreshCatalog() }
+            }
+            coroutineScope {
+                launch { refreshReviews() }
+                launch { refreshCrowding() }
+            }
         } finally {
             refreshing = false
         }
@@ -215,10 +219,43 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         scope.launch { localStore.saveRecentSearches(snapshot) }
     }
 
+    suspend fun loadRemote() {
+        coroutineScope {
+            launch {
+                services.profileSynchronizer.resolve(user.name)?.let {
+                    profile = it
+                    surveyDone = true
+                }
+                profileResolved = true
+            }
+            launch {
+                refreshRestaurants()
+                restaurantsResolved = true
+            }
+            launch {
+                refreshCatalog()
+                catalogResolved = true
+            }
+            launch {
+                attemptOrNull { services.savedRepository.fetch() }?.let {
+                    savedIds = it
+                    localStore.saveSavedIds(it)
+                }
+            }
+        }
+        loadFailed = restaurants.isEmpty() || catalog.isEmpty
+        if (loadFailed) return
+        coroutineScope {
+            launch { refreshReviews() }
+            launch { refreshCrowding() }
+        }
+        startupDone = true
+    }
+
     LaunchedEffect(user.id) {
         services.prepareLocalData()
-        localStore.loadProfile()?.let {
-            profile = it
+        localStore.loadProfileRecord()?.let {
+            profile = it.profile
             surveyDone = true
         }
         reviews.addAll(localStore.loadReviews())
@@ -233,31 +270,25 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         profileResolved = surveyDone
         restaurantsResolved = restaurants.isNotEmpty()
         catalogResolved = !catalog.isEmpty
-
-        attemptOrNull { services.profileRepository.fetch() }?.let { remote ->
-            val restored = remote.copy(name = remote.name.ifBlank { user.name })
-            localStore.saveProfile(restored)
-            profile = restored
-            surveyDone = true
-        }
-        profileResolved = true
-        refreshRestaurants()
-        restaurantsResolved = true
-        refreshCatalog()
-        catalogResolved = true
-        attemptOrNull { services.savedRepository.fetch() }?.let {
-            savedIds = it
-            localStore.saveSavedIds(it)
-        }
-        refreshReviews()
-        refreshCrowding()
-        startupDone = true
+        loadRemote()
     }
 
     // Sensor GPS: se pide el permiso al terminar el onboarding y se comparte con las pantallas
     val userLocation = rememberUserLocation()
     LaunchedEffect(surveyDone) {
         if (surveyDone && !userLocation.hasPermission) userLocation.requestPermission()
+    }
+
+    if (loadFailed) {
+        ConnectionErrorView(
+            onRetry = {
+                loadFailed = false
+                restaurantsResolved = false
+                catalogResolved = false
+                scope.launch { loadRemote() }
+            }
+        )
+        return
     }
 
     if (!profileResolved || !restaurantsResolved || !catalogResolved) {
@@ -276,10 +307,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         val completed = answers.copy(name = answers.name.ifBlank { user.name })
                         profile = completed
                         surveyDone = true
-                        scope.launch {
-                            localStore.saveProfile(completed)
-                            attemptOrNull { services.profileRepository.save(completed) }
-                        }
+                        scope.launch { services.profileSynchronizer.update(completed) }
                     }
                 )
             }
@@ -451,10 +479,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                             val updated = answers.copy(name = answers.name.ifBlank { user.name })
                             analytics.onProfileSaved(profile, updated)
                             profile = updated
-                            scope.launch {
-                                localStore.saveProfile(updated)
-                                attemptOrNull { services.profileRepository.save(updated) }
-                            }
+                            scope.launch { services.profileSynchronizer.update(updated) }
                             popOverlay()
                         }
                     )
