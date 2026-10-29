@@ -1,6 +1,8 @@
 package com.uniandes.campuseats.data
 
-import com.uniandes.campuseats.data.remote.CatalogCache
+import com.uniandes.campuseats.data.cache.CacheKeys
+import com.uniandes.campuseats.data.cache.CachePolicy
+import com.uniandes.campuseats.data.cache.CacheTtl
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.parseCatalog
 import com.uniandes.campuseats.net.RemoteApi
@@ -8,6 +10,8 @@ import java.io.IOException
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,19 +30,21 @@ class CatalogRepositoryTest {
         """.trimIndent()
     )
 
-    private class MemoryCache(var raw: String? = null) : CatalogCache {
-        override suspend fun load() = raw
-        override suspend fun save(raw: String) {
-            this.raw = raw
-        }
-    }
-
     private class FakeApi(private val response: JSONObject?) : RemoteApi {
-        override suspend fun get(path: String): JSONObject = response ?: throw IOException("offline")
+        var calls = 0
+        override suspend fun get(path: String): JSONObject {
+            calls++
+            return response ?: throw IOException("offline")
+        }
         override suspend fun post(path: String, body: Map<String, Any>) = JSONObject()
         override suspend fun put(path: String, body: Map<String, Any>?) = JSONObject()
         override suspend fun delete(path: String) = JSONObject()
     }
+
+    private val clock = FakeClock()
+    private val policy = CachePolicy(clock)
+
+    private fun repository(api: RemoteApi, cache: FakeDocumentCache) = CatalogRepository(api, cache, policy)
 
     @Test
     fun parsesGroupsKeepingOrderAndOptionalFields() {
@@ -53,15 +59,38 @@ class CatalogRepositoryTest {
 
     @Test
     fun fetchStoresCacheAndFailureKeepsIt() = runTest {
-        val cache = MemoryCache()
-        assertTrue(CatalogRepository(FakeApi(payload), cache).fetch().labels("filter_prices").size == 2)
-        val offline = CatalogRepository(FakeApi(null), cache)
+        val cache = FakeDocumentCache()
+        assertTrue(repository(FakeApi(payload), cache).fetch().labels("filter_prices").size == 2)
+        assertEquals(clock.now, cache.fetchedAt(CacheKeys.CATALOG))
+        val offline = repository(FakeApi(null), cache)
         assertTrue(runCatching { offline.fetch() }.isFailure)
         assertEquals(2, offline.cached().labels("filter_prices").size)
     }
 
     @Test
-    fun corruptCacheYieldsEmptyCatalog() = runTest {
-        assertTrue(CatalogRepository(FakeApi(null), MemoryCache("not json")).cached().isEmpty)
+    fun corruptCacheYieldsEmptyCatalogAndIsDiscarded() = runTest {
+        val cache = FakeDocumentCache().apply { put(CacheKeys.CATALOG, "not json", clock.now) }
+        assertTrue(repository(FakeApi(null), cache).cached().isEmpty)
+        assertFalse(cache.has(CacheKeys.CATALOG))
+    }
+
+    @Test
+    fun revalidateRespectsTheDailyTtl() = runTest {
+        val cache = FakeDocumentCache().apply { put(CacheKeys.CATALOG, payload.toString(), clock.now) }
+        val api = FakeApi(payload)
+        clock.now += CacheTtl.CATALOG - 1
+        assertNull(repository(api, cache).revalidate())
+        assertEquals(0, api.calls)
+        clock.now += 1
+        assertNotNull(repository(api, cache).revalidate())
+        assertEquals(1, api.calls)
+    }
+
+    @Test
+    fun forceRevalidateIgnoresFreshness() = runTest {
+        val cache = FakeDocumentCache().apply { put(CacheKeys.CATALOG, payload.toString(), clock.now) }
+        val api = FakeApi(payload)
+        assertNotNull(repository(api, cache).revalidate(force = true))
+        assertEquals(1, api.calls)
     }
 }

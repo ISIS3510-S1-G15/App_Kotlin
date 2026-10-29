@@ -125,7 +125,7 @@ fun rememberUserLocation(): UserLocationState {
     )
 }
 
-private tailrec fun Context.findLifecycleOwner(): LifecycleOwner? = when (this) {
+internal tailrec fun Context.findLifecycleOwner(): LifecycleOwner? = when (this) {
     is LifecycleOwner -> this
     is ContextWrapper -> baseContext.findLifecycleOwner()
     else -> null

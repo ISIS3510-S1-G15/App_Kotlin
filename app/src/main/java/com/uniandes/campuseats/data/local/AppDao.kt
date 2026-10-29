@@ -56,6 +56,9 @@ interface AppDao {
     @Query("SELECT * FROM cache_documents WHERE `key` = :key")
     suspend fun document(key: String): CacheDocumentEntity?
 
+    @Query("DELETE FROM cache_documents WHERE `key` = :key")
+    suspend fun deleteDocument(key: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDocument(document: CacheDocumentEntity)
 }

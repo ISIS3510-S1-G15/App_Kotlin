@@ -4,14 +4,13 @@ import com.uniandes.campuseats.R
 import com.uniandes.campuseats.data.MenuItem
 import com.uniandes.campuseats.data.MenuSection
 import com.uniandes.campuseats.data.Restaurant
+import com.uniandes.campuseats.data.cache.CacheKeys
+import com.uniandes.campuseats.data.cache.CachePolicy
+import com.uniandes.campuseats.data.cache.CacheTtl
+import com.uniandes.campuseats.data.cache.DocumentCache
 import com.uniandes.campuseats.net.RemoteApi
 import com.uniandes.campuseats.net.attemptOrNull
 import org.json.JSONObject
-
-interface RestaurantCache {
-    suspend fun load(): String?
-    suspend fun save(raw: String)
-}
 
 fun bundledImageFor(key: String): Int? = when (key) {
     "starbucks" -> R.drawable.starbucks
@@ -65,18 +64,30 @@ private fun menuFromRemote(json: JSONObject): List<MenuSection> {
 
 class RestaurantRepository(
     private val api: RemoteApi,
-    private val cache: RestaurantCache,
-    private val imageFor: (String) -> Int? = ::bundledImageFor
+    private val cache: DocumentCache,
+    private val imageFor: (String) -> Int? = ::bundledImageFor,
+    private val policy: CachePolicy = CachePolicy()
 ) {
 
-    suspend fun cached(): List<Restaurant> = attemptOrNull {
-        cache.load()?.let { parseRestaurants(JSONObject(it), imageFor) }
-    }.orEmpty()
+    suspend fun cached(): List<Restaurant> {
+        val raw = attemptOrNull { cache.load(CacheKeys.RESTAURANTS) } ?: return emptyList()
+        val parsed = attemptOrNull { parseRestaurants(JSONObject(raw), imageFor) }
+        if (parsed == null) {
+            attemptOrNull { cache.clear(CacheKeys.RESTAURANTS) }
+            return emptyList()
+        }
+        return parsed
+    }
+
+    suspend fun isStale(): Boolean = !policy.isFreshOrFalse(cache, CacheKeys.RESTAURANTS, CacheTtl.RESTAURANTS)
+
+    suspend fun revalidate(force: Boolean = false): List<Restaurant>? =
+        if (!force && !isStale()) null else fetch()
 
     suspend fun fetch(): List<Restaurant> {
         val json = api.get("/restaurants")
         val parsed = parseRestaurants(json, imageFor)
-        if (parsed.isNotEmpty()) cache.save(json.toString())
+        if (parsed.isNotEmpty()) cache.save(CacheKeys.RESTAURANTS, json.toString(), policy.now())
         return parsed
     }
 }

@@ -8,8 +8,7 @@ import com.uniandes.campuseats.auth.SessionStore
 import com.uniandes.campuseats.data.local.AppDatabase
 import com.uniandes.campuseats.data.local.LegacyPreferencesMigration
 import com.uniandes.campuseats.data.local.LocalStore
-import com.uniandes.campuseats.data.local.RoomCatalogCache
-import com.uniandes.campuseats.data.local.RoomRestaurantCache
+import com.uniandes.campuseats.data.local.RoomDocumentCache
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.OccupancyRepository
 import com.uniandes.campuseats.data.remote.ProfileRepository
@@ -24,15 +23,16 @@ import kotlinx.coroutines.sync.withLock
 class AppServices private constructor(val appContext: Context) {
     val sessionStore = SessionStore(appContext)
     val localStore = LocalStore(AppDatabase.create(appContext))
+    val documentCache = RoomDocumentCache(localStore)
     private val migrationLock = Mutex()
     val api: RemoteApi = HttpRemoteApi(BuildConfig.API_BASE_URL) { sessionStore.token }
     val authRepository = AuthRepository(api, sessionStore)
     val profileRepository = ProfileRepository(api)
     val savedRepository = SavedRepository(api)
-    val restaurantRepository = RestaurantRepository(api, RoomRestaurantCache(localStore))
-    val reviewRepository = ReviewRepository(api)
-    val catalogRepository = CatalogRepository(api, RoomCatalogCache(localStore))
-    val occupancyRepository = OccupancyRepository(api)
+    val restaurantRepository = RestaurantRepository(api, documentCache)
+    val reviewRepository = ReviewRepository(api, documentCache)
+    val catalogRepository = CatalogRepository(api, documentCache)
+    val occupancyRepository = OccupancyRepository(api, documentCache)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)
 
     suspend fun prepareLocalData() = migrationLock.withLock {
