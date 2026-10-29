@@ -16,7 +16,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        val apiBaseUrl = project.findProperty("apiBaseUrl")?.toString() ?: "http://localhost:8000"
+        val apiBaseUrl = project.findProperty("apiBaseUrl")?.toString() ?: "https://backend-production-925d.up.railway.app"
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
