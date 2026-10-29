@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
@@ -23,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -51,6 +53,8 @@ import com.uniandes.campuseats.data.Catalog
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.emptyProfile
+import com.uniandes.campuseats.data.outbox.OutboxKind
+import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.findLifecycleOwner
@@ -65,6 +69,8 @@ import com.uniandes.campuseats.ui.LocalMealRules
 import com.uniandes.campuseats.ui.LocalRestaurants
 import com.uniandes.campuseats.ui.LoginView
 import com.uniandes.campuseats.ui.MapView
+import com.uniandes.campuseats.ui.OfflineBanner
+import com.uniandes.campuseats.ui.PendingSyncBanner
 import com.uniandes.campuseats.ui.ProfileView
 import com.uniandes.campuseats.ui.ReviewsListView
 import com.uniandes.campuseats.ui.SavedView
@@ -117,6 +123,7 @@ fun CampusEatsMainScreen() {
                 user = user,
                 onLogout = {
                     scope.launch {
+                        if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
                         services.localStore.clearUserData()
                         auth.logout()
                     }
@@ -156,6 +163,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     var startupDone by remember { mutableStateOf(false) }
     var loadFailed by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    var outboxPending by remember { mutableIntStateOf(0) }
+    val online by services.connectivity.online.collectAsState()
 
     suspend fun refreshRestaurants(force: Boolean = false) {
         val fetched = attemptOrNull { services.restaurantRepository.revalidate(force) }?.takeIf { it.isNotEmpty() }
@@ -187,7 +196,33 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         localStore.saveCrowding(fetched)
     }
 
+    suspend fun flushOutbox() {
+        val result = attemptOrNull { services.outboxFlusher.flush() } ?: return
+        outboxPending = result.remaining
+        if (result.dropped > 0) {
+            Toast.makeText(context, "Some changes made offline could not be saved", Toast.LENGTH_SHORT).show()
+        }
+        if ((OutboxKind.SAVED in result.sentKinds && result.remaining == 0) || result.dropped > 0) {
+            attemptOrNull { services.savedRepository.fetch() }?.let {
+                savedIds = it
+                localStore.saveSavedIds(it)
+            }
+        }
+        if (OutboxKind.OCCUPANCY in result.sentKinds) refreshCrowding(force = true)
+        if (OutboxKind.REVIEW in result.sentKinds) {
+            refreshReviews(force = true)
+            refreshRestaurants(force = true)
+        }
+    }
+
+    suspend fun enqueueAndFlush(request: OutboxRequest) {
+        services.outboxStore.enqueue(request)
+        outboxPending = services.outboxStore.count()
+        if (services.connectivity.online.value) flushOutbox()
+    }
+
     suspend fun refreshStale() {
+        flushOutbox()
         if (refreshing) return
         refreshing = true
         try {
@@ -237,9 +272,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                 catalogResolved = true
             }
             launch {
-                attemptOrNull { services.savedRepository.fetch() }?.let {
-                    savedIds = it
-                    localStore.saveSavedIds(it)
+                if (services.connectivity.online.value) flushOutbox()
+                if (outboxPending == 0) {
+                    attemptOrNull { services.savedRepository.fetch() }?.let {
+                        savedIds = it
+                        localStore.saveSavedIds(it)
+                    }
                 }
             }
         }
@@ -252,8 +290,13 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         startupDone = true
     }
 
+    LaunchedEffect(online) {
+        if (online && startupDone) refreshStale()
+    }
+
     LaunchedEffect(user.id) {
         services.prepareLocalData()
+        outboxPending = services.outboxStore.count()
         localStore.loadProfileRecord()?.let {
             profile = it.profile
             surveyDone = true
@@ -329,29 +372,19 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     }
 
     fun toggleSaved(id: String) {
-        val before = savedIds
-        val wasSaved = id in before
-        savedIds = if (wasSaved) before - id else before + id
+        val wasSaved = id in savedIds
+        savedIds = if (wasSaved) savedIds - id else savedIds + id
+        val snapshot = savedIds
         scope.launch {
-            try {
-                val confirmed = if (wasSaved) {
-                    services.savedRepository.remove(id)
-                } else {
-                    services.savedRepository.add(id)
-                }
-                savedIds = confirmed
-                localStore.saveSavedIds(confirmed)
-                sections.onInteraction(
-                    AppSection.Favorites,
-                    if (wasSaved) SectionAction.FavoriteRemoved else SectionAction.FavoriteAdded,
-                    visitSection = AppSection.Details
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                savedIds = before
-                Toast.makeText(context, "Could not update your saved spots", Toast.LENGTH_SHORT).show()
-            }
+            localStore.saveSavedIds(snapshot)
+            sections.onInteraction(
+                AppSection.Favorites,
+                if (wasSaved) SectionAction.FavoriteRemoved else SectionAction.FavoriteAdded,
+                visitSection = AppSection.Details
+            )
+            enqueueAndFlush(
+                if (wasSaved) services.savedRepository.removeRequest(id) else services.savedRepository.addRequest(id)
+            )
         }
     }
 
@@ -393,7 +426,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     CompositionLocalProvider(LocalRestaurants provides restaurants, LocalCatalog provides catalog, LocalMealRules provides mealRules) {
         Scaffold(
             bottomBar = {
-                if (overlay != Overlay.Survey) {
+                if (overlay != Overlay.Survey) Column {
+                    if (!online) OfflineBanner(outboxPending)
+                    else if (outboxPending > 0) PendingSyncBanner(outboxPending)
                     NavigationBar(containerColor = Color.White) {
                         val unselectedColor = Color.Gray
                         val selectedColor = Color(0xFFE8440A) // Naranja de Campus Eats
@@ -449,15 +484,14 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         authorName = profile.name,
                         onSubmit = { review ->
                             scope.launch {
-                                try {
-                                    services.reviewRepository.submit(review)
-                                    refreshReviews()
-                                    refreshRestaurants()
-                                } catch (e: CancellationException) {
-                                    throw e
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Could not submit your review", Toast.LENGTH_SHORT).show()
+                                if (!services.connectivity.online.value) {
+                                    Toast.makeText(
+                                        context,
+                                        "You're offline. Your review will be posted when you reconnect.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
+                                enqueueAndFlush(services.reviewRepository.submitRequest(review))
                             }
                         },
                         onBack = ::popOverlay
@@ -560,10 +594,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                             restaurant = pending,
                             onSubmit = { level ->
                                 scope.launch {
-                                    attemptOrNull { services.occupancyRepository.report(pending.id, level) }?.let {
-                                        crowding[pending.id] = it
-                                        localStore.saveCrowding(crowding.toMap())
-                                    }
+                                    crowding[pending.id] = crowding[pending.id].orEmpty() + level
+                                    localStore.saveCrowding(crowding.toMap())
+                                    enqueueAndFlush(services.occupancyRepository.reportRequest(pending.id, level))
                                 }
                                 commitDetail(pending)
                             },

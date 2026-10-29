@@ -4,6 +4,8 @@ import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.data.cache.CachePolicy
 import com.uniandes.campuseats.data.cache.CacheTtl
 import com.uniandes.campuseats.data.cache.DocumentCache
+import com.uniandes.campuseats.data.outbox.OutboxKind
+import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.RemoteApi
 import com.uniandes.campuseats.net.attemptOrNull
 import org.json.JSONObject
@@ -44,6 +46,13 @@ class OccupancyRepository(
         val fresh = !force && policy.isFreshOrFalse(cache, CacheKeys.OCCUPANCY, CacheTtl.OCCUPANCY)
         return if (fresh) null else fetchAll()
     }
+
+    fun reportRequest(restaurantId: String, appLevel: Int) = OutboxRequest(
+        OutboxKind.OCCUPANCY,
+        "POST",
+        "/occupancy/reports",
+        mapOf("restaurant_id" to restaurantId, "level" to remoteLevelFromApp(appLevel))
+    )
 
     suspend fun report(restaurantId: String, appLevel: Int): List<Int> {
         val reports = reportsOf(

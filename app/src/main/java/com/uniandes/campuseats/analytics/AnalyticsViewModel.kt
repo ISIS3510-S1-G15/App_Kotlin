@@ -6,6 +6,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.uniandes.campuseats.AppServices
 import com.uniandes.campuseats.data.Profile
+import com.uniandes.campuseats.data.outbox.OutboxKind
+import com.uniandes.campuseats.data.outbox.OutboxRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,7 +46,13 @@ class AnalyticsViewModel(
         fun factory(services: AppServices): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-                val gateway = AnalyticsGateway(services.analyticsTransport, scope)
+                val gateway = AnalyticsGateway(
+                    services.analyticsTransport,
+                    scope,
+                    keepForLater = { path, body ->
+                        services.outboxStore.enqueue(OutboxRequest(OutboxKind.ANALYTICS, "POST", path, body))
+                    }
+                )
                 AnalyticsViewModel(AnalyticsRepository(gateway) { InstallId.get(services.appContext) }, scope)
             }
         }

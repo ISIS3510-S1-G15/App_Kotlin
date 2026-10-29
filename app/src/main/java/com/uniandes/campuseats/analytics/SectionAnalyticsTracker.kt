@@ -1,6 +1,7 @@
 package com.uniandes.campuseats.analytics
 
 import android.util.Log
+import com.uniandes.campuseats.net.ApiException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -19,6 +20,7 @@ class SectionAnalyticsTracker(
     private val maxQueueSize: Int = DEFAULT_MAX_QUEUE_SIZE,
     private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
     private val retryDelayMs: Long = DEFAULT_RETRY_DELAY_MS,
+    private val keepForLater: (suspend (String, Map<String, Any>) -> Unit)? = null,
     private val onFailure: (Throwable) -> Unit = { Log.w("Analytics", "Could not log section events: $it") }
 ) {
     private val lock = Any()
@@ -78,6 +80,7 @@ class SectionAnalyticsTracker(
 
     private suspend fun send(batch: List<SectionEvent>) {
         val body = mapOf<String, Any>("events" to batch.map { it.toBody() })
+        var lastError: Exception? = null
         for (attempt in 1..maxAttempts) {
             try {
                 transport.post(EVENTS_PATH, body)
@@ -85,10 +88,12 @@ class SectionAnalyticsTracker(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                lastError = e
                 onFailure(e)
                 if (attempt < maxAttempts) delay(retryDelayMs * attempt)
             }
         }
+        if (lastError != null && lastError !is ApiException) keepForLater?.invoke(EVENTS_PATH, body)
     }
 
     private fun formatTimestamp(millis: Long): String =
