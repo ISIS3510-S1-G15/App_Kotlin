@@ -45,10 +45,10 @@ import com.uniandes.campuseats.data.MealRules
 import com.uniandes.campuseats.data.remote.applyRatingSummaries
 import com.uniandes.campuseats.auth.AuthUser
 import com.uniandes.campuseats.auth.AuthViewModel
-import com.uniandes.campuseats.data.AppDataStore
-import com.uniandes.campuseats.data.ProfileStore
+import com.uniandes.campuseats.data.Catalog
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.data.emptyProfile
 import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.rememberUserLocation
@@ -93,6 +93,7 @@ private const val PROFILE_TAB = 4
 fun CampusEatsMainScreen() {
     val context = LocalContext.current
     val services = remember { AppServices.get(context) }
+    val scope = rememberCoroutineScope()
     val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository))
     val user = auth.user
 
@@ -110,9 +111,10 @@ fun CampusEatsMainScreen() {
                 services = services,
                 user = user,
                 onLogout = {
-                    ProfileStore(context.applicationContext).clear()
-                    AppDataStore(context.applicationContext).clearSavedIds()
-                    auth.logout()
+                    scope.launch {
+                        services.localStore.clearUserData()
+                        auth.logout()
+                    }
                 }
             )
         }
@@ -123,14 +125,13 @@ fun CampusEatsMainScreen() {
 private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val profileStore = remember { ProfileStore(context.applicationContext) }
-    val dataStore = remember { AppDataStore(context.applicationContext) }
+    val localStore = services.localStore
     val analytics: AnalyticsViewModel = viewModel(factory = AnalyticsViewModel.factory(services))
     val sections: SectionAnalyticsViewModel = viewModel(factory = SectionAnalyticsViewModel.factory(services))
 
-    var profileResolved by remember { mutableStateOf(profileStore.isSurveyDone) }
-    var surveyDone by remember { mutableStateOf(profileStore.isSurveyDone) }
-    var profile by remember { mutableStateOf(profileStore.load()) }
+    var profileResolved by remember { mutableStateOf(false) }
+    var surveyDone by remember { mutableStateOf(false) }
+    var profile by remember { mutableStateOf(emptyProfile) }
     var currentTab by remember { mutableIntStateOf(0) }
 
     val overlayStack = remember { mutableStateListOf<Overlay>() }
@@ -138,15 +139,14 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     var selectedRestaurant by remember { mutableStateOf<Restaurant?>(null) }
     var pendingRestaurant by remember { mutableStateOf<Restaurant?>(null) }
 
-    // Datos del usuario persistidos (si no hay nada guardado, AppDataStore devuelve la semilla)
-    val reviews = remember { mutableStateListOf<Review>().apply { addAll(dataStore.loadReviews()) } }
-    val crowding = remember { mutableStateMapOf<String, List<Int>>().apply { putAll(dataStore.loadCrowding()) } }
-    var savedIds by remember { mutableStateOf(dataStore.loadSavedIds()) }
-    var restaurants by remember { mutableStateOf(services.restaurantRepository.cached()) }
-    var restaurantsResolved by remember { mutableStateOf(restaurants.isNotEmpty()) }
-    var recentSearches by remember { mutableStateOf(dataStore.loadRecentSearches()) }
-    var catalog by remember { mutableStateOf(services.catalogRepository.cached()) }
-    var catalogResolved by remember { mutableStateOf(!catalog.isEmpty) }
+    val reviews = remember { mutableStateListOf<Review>() }
+    val crowding = remember { mutableStateMapOf<String, List<Int>>() }
+    var savedIds by remember { mutableStateOf(emptySet<String>()) }
+    var restaurants by remember { mutableStateOf(emptyList<Restaurant>()) }
+    var restaurantsResolved by remember { mutableStateOf(false) }
+    var recentSearches by remember { mutableStateOf(emptyList<String>()) }
+    var catalog by remember { mutableStateOf(Catalog.Empty) }
+    var catalogResolved by remember { mutableStateOf(false) }
 
     suspend fun refreshCatalog() {
         val fetched = attemptOrNull { services.restaurantRepository.fetch() }?.takeIf { it.isNotEmpty() } ?: return
@@ -162,25 +162,41 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         }
         reviews.clear()
         reviews.addAll(merged)
-        dataStore.saveReviews(merged)
+        localStore.saveReviews(merged)
     }
 
     suspend fun refreshCrowding() {
         val fetched = attemptOrNull { services.occupancyRepository.fetchAll() } ?: return
         crowding.clear()
         crowding.putAll(fetched)
-        dataStore.saveCrowding(fetched)
+        localStore.saveCrowding(fetched)
     }
 
     fun recordRecentSearch(name: String) {
         recentSearches = (listOf(name) + recentSearches.filter { it != name }).take(MAX_RECENT_SEARCHES)
-        dataStore.saveRecentSearches(recentSearches)
+        val snapshot = recentSearches
+        scope.launch { localStore.saveRecentSearches(snapshot) }
     }
 
     LaunchedEffect(user.id) {
+        services.prepareLocalData()
+        localStore.loadProfile()?.let {
+            profile = it
+            surveyDone = true
+        }
+        reviews.addAll(localStore.loadReviews())
+        crowding.putAll(localStore.loadCrowding())
+        savedIds = localStore.loadSavedIds()
+        recentSearches = localStore.loadRecentSearches()
+        restaurants = services.restaurantRepository.cached()
+        catalog = services.catalogRepository.cached()
+        profileResolved = surveyDone
+        restaurantsResolved = restaurants.isNotEmpty()
+        catalogResolved = !catalog.isEmpty
+
         attemptOrNull { services.profileRepository.fetch() }?.let { remote ->
             val restored = remote.copy(name = remote.name.ifBlank { user.name })
-            profileStore.save(restored)
+            localStore.saveProfile(restored)
             profile = restored
             surveyDone = true
         }
@@ -191,7 +207,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         catalogResolved = true
         attemptOrNull { services.savedRepository.fetch() }?.let {
             savedIds = it
-            dataStore.saveSavedIds(it)
+            localStore.saveSavedIds(it)
         }
         refreshReviews()
         refreshCrowding()
@@ -217,10 +233,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                     initialName = user.name,
                     onComplete = { answers ->
                         val completed = answers.copy(name = answers.name.ifBlank { user.name })
-                        profileStore.save(completed)
                         profile = completed
                         surveyDone = true
-                        scope.launch { attemptOrNull { services.profileRepository.save(completed) } }
+                        scope.launch {
+                            localStore.saveProfile(completed)
+                            attemptOrNull { services.profileRepository.save(completed) }
+                        }
                     }
                 )
             }
@@ -253,7 +271,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                     services.savedRepository.add(id)
                 }
                 savedIds = confirmed
-                dataStore.saveSavedIds(confirmed)
+                localStore.saveSavedIds(confirmed)
                 sections.onInteraction(
                     AppSection.Favorites,
                     if (wasSaved) SectionAction.FavoriteRemoved else SectionAction.FavoriteAdded,
@@ -391,9 +409,11 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         onComplete = { answers ->
                             val updated = answers.copy(name = answers.name.ifBlank { user.name })
                             analytics.onProfileSaved(profile, updated)
-                            profileStore.save(updated)
                             profile = updated
-                            scope.launch { attemptOrNull { services.profileRepository.save(updated) } }
+                            scope.launch {
+                                localStore.saveProfile(updated)
+                                attemptOrNull { services.profileRepository.save(updated) }
+                            }
                             popOverlay()
                         }
                     )
@@ -428,7 +448,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                             recentSearches = recentSearches,
                             onClearRecent = {
                                 recentSearches = emptyList()
-                                dataStore.saveRecentSearches(emptyList())
+                                scope.launch { localStore.saveRecentSearches(emptyList()) }
                             }
                         )
                         MAP_TAB -> MapView(
@@ -476,7 +496,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                                 scope.launch {
                                     attemptOrNull { services.occupancyRepository.report(pending.id, level) }?.let {
                                         crowding[pending.id] = it
-                                        dataStore.saveCrowding(crowding)
+                                        localStore.saveCrowding(crowding.toMap())
                                     }
                                 }
                                 commitDetail(pending)

@@ -1,28 +1,15 @@
 package com.uniandes.campuseats.data.remote
 
-import android.content.Context
-import androidx.core.content.edit
 import com.uniandes.campuseats.data.Catalog
 import com.uniandes.campuseats.data.CatalogOption
 import com.uniandes.campuseats.net.RemoteApi
+import com.uniandes.campuseats.net.attemptOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
 interface CatalogCache {
-    fun load(): String?
-    fun save(raw: String)
-}
-
-class SharedPrefsCatalogCache(context: Context) : CatalogCache {
-    private val prefs = context.getSharedPreferences("campus_eats_catalog", Context.MODE_PRIVATE)
-
-    override fun load(): String? = prefs.getString(KEY, null)
-
-    override fun save(raw: String) = prefs.edit { putString(KEY, raw) }
-
-    private companion object {
-        const val KEY = "catalog_json"
-    }
+    suspend fun load(): String?
+    suspend fun save(raw: String)
 }
 
 private fun JSONObject.textOrNull(key: String): String? =
@@ -59,8 +46,8 @@ fun parseCatalog(json: JSONObject): Catalog {
 
 class CatalogRepository(private val api: RemoteApi, private val cache: CatalogCache) {
 
-    fun cached(): Catalog = runCatching { cache.load()?.let { parseCatalog(JSONObject(it)) } }
-        .getOrNull() ?: Catalog.Empty
+    suspend fun cached(): Catalog = attemptOrNull { cache.load()?.let { parseCatalog(JSONObject(it)) } }
+        ?: Catalog.Empty
 
     suspend fun fetch(): Catalog {
         val json = api.get("/catalog")

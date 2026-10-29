@@ -30,8 +30,8 @@ class RestaurantRepositoryTest {
     )
 
     private class MemoryCache(var raw: String? = null) : RestaurantCache {
-        override fun load() = raw
-        override fun save(raw: String) {
+        override suspend fun load() = raw
+        override suspend fun save(raw: String) {
             this.raw = raw
         }
     }
@@ -75,7 +75,7 @@ class RestaurantRepositoryTest {
     }
 
     @Test
-    fun corruptCacheYieldsEmptyList() {
+    fun corruptCacheYieldsEmptyList() = runTest {
         val repository = RestaurantRepository(FakeApi(null), MemoryCache("not json"), imageFor)
         assertTrue(repository.cached().isEmpty())
     }
