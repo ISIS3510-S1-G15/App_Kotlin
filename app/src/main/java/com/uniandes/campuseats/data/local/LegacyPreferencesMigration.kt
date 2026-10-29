@@ -25,7 +25,7 @@ class LegacyPreferencesMigration(private val context: Context, private val store
         crowdingFrom(data.getString("crowding", null)).takeIf { it.isNotEmpty() }?.let { store.saveCrowding(it) }
         data.getStringSet("saved_ids", null)?.let { store.saveSavedIds(it.toSet()) }
         data.getString("recent_searches", null)?.let { store.saveRecentSearches(StringListCodec.decode(it)) }
-        if (profile.getBoolean("survey_done", false)) store.saveProfile(profileFrom(profile))
+        if (profile.getBoolean("survey_done", false)) store.saveProfile(profileFrom(profile), pendingSync = false)
         restaurants.getString("restaurants_json", null)?.let { store.saveDocument(CacheKeys.RESTAURANTS, it, 0L) }
         catalog.getString("catalog_json", null)?.let { store.saveDocument(CacheKeys.CATALOG, it, 0L) }
 
