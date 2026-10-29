@@ -36,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.uniandes.campuseats.analytics.AnalyticsScreen
 import com.uniandes.campuseats.analytics.AnalyticsViewModel
 import com.uniandes.campuseats.analytics.AppSection
@@ -51,6 +53,7 @@ import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.emptyProfile
 import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
+import com.uniandes.campuseats.sensor.findLifecycleOwner
 import com.uniandes.campuseats.sensor.rememberUserLocation
 import com.uniandes.campuseats.ui.CrowdingModal
 import com.uniandes.campuseats.ui.DetailView
@@ -148,28 +151,62 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     var catalog by remember { mutableStateOf(Catalog.Empty) }
     var catalogResolved by remember { mutableStateOf(false) }
 
-    suspend fun refreshCatalog() {
-        val fetched = attemptOrNull { services.restaurantRepository.fetch() }?.takeIf { it.isNotEmpty() } ?: return
-        val summaries = attemptOrNull { services.reviewRepository.summaries() }.orEmpty()
-        restaurants = applyRatingSummaries(fetched, summaries)
+    var startupDone by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+
+    suspend fun refreshRestaurants(force: Boolean = false) {
+        val fetched = attemptOrNull { services.restaurantRepository.revalidate(force) }?.takeIf { it.isNotEmpty() }
+        val freshSummaries = attemptOrNull { services.reviewRepository.revalidateSummaries(force) }
+        val base = fetched ?: restaurants.takeIf { freshSummaries != null && it.isNotEmpty() } ?: return
+        val summaries = freshSummaries ?: services.reviewRepository.cachedSummaries()
+        restaurants = applyRatingSummaries(base, summaries)
     }
 
-    suspend fun refreshReviews() {
+    suspend fun refreshCatalog(force: Boolean = false) {
+        attemptOrNull { services.catalogRepository.revalidate(force) }?.takeIf { !it.isEmpty }?.let { catalog = it }
+    }
+
+    suspend fun refreshReviews(force: Boolean = false) {
         val current = reviews.toList()
+        var changed = false
         val merged = restaurants.flatMap { restaurant ->
-            attemptOrNull { services.reviewRepository.forRestaurant(restaurant.id) }
-                ?: current.filter { it.restaurantId == restaurant.id }
+            val fetched = attemptOrNull { services.reviewRepository.revalidate(restaurant.id, force) }
+            if (fetched != null) changed = true
+            fetched ?: current.filter { it.restaurantId == restaurant.id }
         }
+        if (!changed) return
         reviews.clear()
         reviews.addAll(merged)
         localStore.saveReviews(merged)
     }
 
-    suspend fun refreshCrowding() {
-        val fetched = attemptOrNull { services.occupancyRepository.fetchAll() } ?: return
+    suspend fun refreshCrowding(force: Boolean = false) {
+        val fetched = attemptOrNull { services.occupancyRepository.revalidate(force) } ?: return
         crowding.clear()
         crowding.putAll(fetched)
         localStore.saveCrowding(fetched)
+    }
+
+    suspend fun refreshStale() {
+        if (refreshing) return
+        refreshing = true
+        try {
+            refreshRestaurants()
+            refreshCatalog()
+            refreshReviews()
+            refreshCrowding()
+        } finally {
+            refreshing = false
+        }
+    }
+
+    val lifecycleOwner = remember(context) { context.findLifecycleOwner() }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && startupDone) scope.launch { refreshStale() }
+        }
+        lifecycleOwner?.lifecycle?.addObserver(observer)
+        onDispose { lifecycleOwner?.lifecycle?.removeObserver(observer) }
     }
 
     fun recordRecentSearch(name: String) {
@@ -188,7 +225,10 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         crowding.putAll(localStore.loadCrowding())
         savedIds = localStore.loadSavedIds()
         recentSearches = localStore.loadRecentSearches()
-        restaurants = services.restaurantRepository.cached()
+        restaurants = applyRatingSummaries(
+            services.restaurantRepository.cached(),
+            services.reviewRepository.cachedSummaries()
+        )
         catalog = services.catalogRepository.cached()
         profileResolved = surveyDone
         restaurantsResolved = restaurants.isNotEmpty()
@@ -201,9 +241,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
             surveyDone = true
         }
         profileResolved = true
-        refreshCatalog()
+        refreshRestaurants()
         restaurantsResolved = true
-        attemptOrNull { services.catalogRepository.fetch() }?.takeIf { !it.isEmpty }?.let { catalog = it }
+        refreshCatalog()
         catalogResolved = true
         attemptOrNull { services.savedRepository.fetch() }?.let {
             savedIds = it
@@ -211,6 +251,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         }
         refreshReviews()
         refreshCrowding()
+        startupDone = true
     }
 
     // Sensor GPS: se pide el permiso al terminar el onboarding y se comparte con las pantallas
@@ -383,7 +424,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                                 try {
                                     services.reviewRepository.submit(review)
                                     refreshReviews()
-                                    refreshCatalog()
+                                    refreshRestaurants()
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: Exception) {

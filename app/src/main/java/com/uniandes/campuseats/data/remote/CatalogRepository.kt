@@ -2,15 +2,14 @@ package com.uniandes.campuseats.data.remote
 
 import com.uniandes.campuseats.data.Catalog
 import com.uniandes.campuseats.data.CatalogOption
+import com.uniandes.campuseats.data.cache.CacheKeys
+import com.uniandes.campuseats.data.cache.CachePolicy
+import com.uniandes.campuseats.data.cache.CacheTtl
+import com.uniandes.campuseats.data.cache.DocumentCache
 import com.uniandes.campuseats.net.RemoteApi
 import com.uniandes.campuseats.net.attemptOrNull
 import org.json.JSONArray
 import org.json.JSONObject
-
-interface CatalogCache {
-    suspend fun load(): String?
-    suspend fun save(raw: String)
-}
 
 private fun JSONObject.textOrNull(key: String): String? =
     if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
@@ -44,15 +43,31 @@ fun parseCatalog(json: JSONObject): Catalog {
     )
 }
 
-class CatalogRepository(private val api: RemoteApi, private val cache: CatalogCache) {
+class CatalogRepository(
+    private val api: RemoteApi,
+    private val cache: DocumentCache,
+    private val policy: CachePolicy = CachePolicy()
+) {
 
-    suspend fun cached(): Catalog = attemptOrNull { cache.load()?.let { parseCatalog(JSONObject(it)) } }
-        ?: Catalog.Empty
+    suspend fun cached(): Catalog {
+        val raw = attemptOrNull { cache.load(CacheKeys.CATALOG) } ?: return Catalog.Empty
+        val parsed = attemptOrNull { parseCatalog(JSONObject(raw)) }
+        if (parsed == null) {
+            attemptOrNull { cache.clear(CacheKeys.CATALOG) }
+            return Catalog.Empty
+        }
+        return parsed
+    }
+
+    suspend fun isStale(): Boolean = !policy.isFreshOrFalse(cache, CacheKeys.CATALOG, CacheTtl.CATALOG)
+
+    suspend fun revalidate(force: Boolean = false): Catalog? =
+        if (!force && !isStale()) null else fetch()
 
     suspend fun fetch(): Catalog {
         val json = api.get("/catalog")
         val parsed = parseCatalog(json)
-        if (!parsed.isEmpty) cache.save(json.toString())
+        if (!parsed.isEmpty) cache.save(CacheKeys.CATALOG, json.toString(), policy.now())
         return parsed
     }
 }

@@ -65,6 +65,10 @@ class LocalStore(private val database: AppDatabase) {
 
     suspend fun loadDocument(key: String): CacheDocumentEntity? = dao.document(key)
 
+    suspend fun deleteDocument(key: String) {
+        dao.deleteDocument(key)
+    }
+
     suspend fun saveDocument(key: String, payload: String, fetchedAt: Long) {
         dao.upsertDocument(CacheDocumentEntity(key, payload, fetchedAt))
     }

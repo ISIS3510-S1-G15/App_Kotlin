@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.data.ReviewRatings
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,8 +26,8 @@ class LegacyPreferencesMigration(private val context: Context, private val store
         data.getStringSet("saved_ids", null)?.let { store.saveSavedIds(it.toSet()) }
         data.getString("recent_searches", null)?.let { store.saveRecentSearches(StringListCodec.decode(it)) }
         if (profile.getBoolean("survey_done", false)) store.saveProfile(profileFrom(profile))
-        restaurants.getString("restaurants_json", null)?.let { store.saveDocument("restaurants", it, 0L) }
-        catalog.getString("catalog_json", null)?.let { store.saveDocument("catalog", it, 0L) }
+        restaurants.getString("restaurants_json", null)?.let { store.saveDocument(CacheKeys.RESTAURANTS, it, 0L) }
+        catalog.getString("catalog_json", null)?.let { store.saveDocument(CacheKeys.CATALOG, it, 0L) }
 
         listOf(data, profile, restaurants, catalog).forEach { prefs -> prefs.edit { clear() } }
         marker.edit { putBoolean(KEY_DONE, true) }
