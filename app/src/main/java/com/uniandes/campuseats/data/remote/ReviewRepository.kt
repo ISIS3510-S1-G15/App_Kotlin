@@ -7,6 +7,8 @@ import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.data.cache.CachePolicy
 import com.uniandes.campuseats.data.cache.CacheTtl
 import com.uniandes.campuseats.data.cache.DocumentCache
+import com.uniandes.campuseats.data.outbox.OutboxKind
+import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.RemoteApi
 import com.uniandes.campuseats.net.attemptOrNull
 import kotlinx.coroutines.async
@@ -115,20 +117,23 @@ class ReviewRepository(
         }
     }
 
-    suspend fun submit(review: Review): Review {
-        val created = reviewFromRemote(
-            api.post(
-                "/restaurants/${review.restaurantId}/reviews",
-                mapOf(
-                    "taste" to review.ratings.taste,
-                    "attention" to review.ratings.attention,
-                    "price" to review.ratings.price,
-                    "options" to review.ratings.options,
-                    "dietary_options" to review.dietaryOptions.take(MAX_DIETARY_OPTIONS),
-                    "comment" to review.comment.take(MAX_COMMENT)
-                )
-            )
+    fun submitRequest(review: Review) = OutboxRequest(
+        OutboxKind.REVIEW,
+        "POST",
+        "/restaurants/${review.restaurantId}/reviews",
+        mapOf(
+            "taste" to review.ratings.taste,
+            "attention" to review.ratings.attention,
+            "price" to review.ratings.price,
+            "options" to review.ratings.options,
+            "dietary_options" to review.dietaryOptions.take(MAX_DIETARY_OPTIONS),
+            "comment" to review.comment.take(MAX_COMMENT)
         )
+    )
+
+    suspend fun submit(review: Review): Review {
+        val request = submitRequest(review)
+        val created = reviewFromRemote(api.post(request.path, request.body.orEmpty()))
         invalidate(review.restaurantId)
         return created
     }

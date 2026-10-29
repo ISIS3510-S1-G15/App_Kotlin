@@ -9,6 +9,8 @@ import com.uniandes.campuseats.data.local.AppDatabase
 import com.uniandes.campuseats.data.local.LegacyPreferencesMigration
 import com.uniandes.campuseats.data.local.LocalStore
 import com.uniandes.campuseats.data.local.RoomDocumentCache
+import com.uniandes.campuseats.data.outbox.OutboxFlusher
+import com.uniandes.campuseats.data.outbox.OutboxStore
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.OccupancyRepository
 import com.uniandes.campuseats.data.remote.ProfileRepository
@@ -16,6 +18,8 @@ import com.uniandes.campuseats.data.remote.ProfileSynchronizer
 import com.uniandes.campuseats.data.remote.RestaurantRepository
 import com.uniandes.campuseats.data.remote.ReviewRepository
 import com.uniandes.campuseats.data.remote.SavedRepository
+import com.uniandes.campuseats.net.ConnectivityMonitor
+import com.uniandes.campuseats.net.ConnectivityObserver
 import com.uniandes.campuseats.net.HttpRemoteApi
 import com.uniandes.campuseats.net.RemoteApi
 import kotlinx.coroutines.sync.Mutex
@@ -28,6 +32,9 @@ class AppServices private constructor(val appContext: Context) {
     private val migrationLock = Mutex()
     val api: RemoteApi = HttpRemoteApi(BuildConfig.API_BASE_URL) { sessionStore.token }
     val authRepository = AuthRepository(api, sessionStore)
+    val connectivity: ConnectivityMonitor = ConnectivityObserver(appContext)
+    val outboxStore: OutboxStore = localStore
+    val outboxFlusher = OutboxFlusher(api, outboxStore)
     val profileRepository = ProfileRepository(api)
     val profileSynchronizer = ProfileSynchronizer(localStore, profileRepository)
     val savedRepository = SavedRepository(api)

@@ -4,10 +4,17 @@ import androidx.room.withTransaction
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.ReviewRatings
+import com.uniandes.campuseats.data.outbox.OutboxCodec
+import com.uniandes.campuseats.data.outbox.OutboxEntry
+import com.uniandes.campuseats.data.outbox.OutboxRequest
+import com.uniandes.campuseats.data.outbox.OutboxStore
 import com.uniandes.campuseats.data.remote.ProfileLocalSource
 import com.uniandes.campuseats.data.remote.StoredProfile
 
-class LocalStore(private val database: AppDatabase) : ProfileLocalSource {
+class LocalStore(
+    private val database: AppDatabase,
+    private val clock: () -> Long = System::currentTimeMillis
+) : ProfileLocalSource, OutboxStore {
 
     private val dao = database.dao()
 
@@ -70,7 +77,39 @@ class LocalStore(private val database: AppDatabase) : ProfileLocalSource {
         database.withTransaction {
             dao.clearProfile()
             dao.clearSaved()
+            dao.clearOutbox()
         }
+    }
+
+    override suspend fun enqueue(request: OutboxRequest) {
+        database.withTransaction {
+            dao.insertOutbox(
+                OutboxEntity(
+                    kind = request.kind,
+                    method = request.method,
+                    path = request.path,
+                    body = OutboxCodec.encode(request.body),
+                    createdAt = clock()
+                )
+            )
+            dao.trimOutbox(MAX_OUTBOX_ENTRIES)
+        }
+    }
+
+    override suspend fun pending(): List<OutboxEntry> = dao.outbox().map {
+        OutboxEntry(it.id, OutboxRequest(it.kind, it.method, it.path, OutboxCodec.decode(it.body)), it.attempts)
+    }
+
+    override suspend fun remove(id: Long) = dao.deleteOutbox(id)
+
+    override suspend fun recordAttempt(id: Long) = dao.bumpOutboxAttempts(id)
+
+    override suspend fun count(): Int = dao.outboxCount()
+
+    override suspend fun clear() = dao.clearOutbox()
+
+    private companion object {
+        const val MAX_OUTBOX_ENTRIES = 1000
     }
 
     suspend fun loadDocument(key: String): CacheDocumentEntity? = dao.document(key)

@@ -49,6 +49,17 @@ data class ProfileEntity(
     }
 }
 
+@Entity(tableName = "outbox")
+data class OutboxEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val kind: String,
+    val method: String,
+    val path: String,
+    val body: String?,
+    val createdAt: Long,
+    val attempts: Int = 0
+)
+
 @Entity(tableName = "cache_documents")
 data class CacheDocumentEntity(
     @PrimaryKey val key: String,

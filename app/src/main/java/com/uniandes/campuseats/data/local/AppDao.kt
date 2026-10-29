@@ -53,6 +53,27 @@ interface AppDao {
     @Query("DELETE FROM profile")
     suspend fun clearProfile()
 
+    @Insert
+    suspend fun insertOutbox(entry: OutboxEntity): Long
+
+    @Query("SELECT * FROM outbox ORDER BY id")
+    suspend fun outbox(): List<OutboxEntity>
+
+    @Query("DELETE FROM outbox WHERE id = :id")
+    suspend fun deleteOutbox(id: Long)
+
+    @Query("UPDATE outbox SET attempts = attempts + 1 WHERE id = :id")
+    suspend fun bumpOutboxAttempts(id: Long)
+
+    @Query("SELECT COUNT(*) FROM outbox")
+    suspend fun outboxCount(): Int
+
+    @Query("DELETE FROM outbox")
+    suspend fun clearOutbox()
+
+    @Query("DELETE FROM outbox WHERE id NOT IN (SELECT id FROM outbox ORDER BY id DESC LIMIT :keep)")
+    suspend fun trimOutbox(keep: Int)
+
     @Query("SELECT * FROM cache_documents WHERE `key` = :key")
     suspend fun document(key: String): CacheDocumentEntity?
 
