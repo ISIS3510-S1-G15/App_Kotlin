@@ -24,6 +24,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,8 +56,11 @@ private val GreenBorder = Color(0xFFC5E0CB)
 fun ProfileView(
     profile: Profile,
     userEmail: String,
+    showLogoutWarning: Boolean,
     onRetakeSurvey: () -> Unit,
-    onLogout: () -> Unit,
+    onLogoutAttempt: () -> Unit,
+    onLogoutConfirm: () -> Unit,
+    onLogoutCancel: () -> Unit,
     onBack: () -> Unit
 ) {
     val initials = if (profile.name.isNotEmpty()) profile.name.take(2).uppercase() else "ME"
@@ -408,7 +413,7 @@ fun ProfileView(
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color.White)
                     .border(1.dp, Outline, RoundedCornerShape(16.dp))
-                    .clickable(onClick = onLogout),
+                    .clickable(onClick = onLogoutAttempt),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -420,6 +425,37 @@ fun ProfileView(
                 )
             }
         }
+    }
+
+    if (showLogoutWarning) {
+        AlertDialog(
+            onDismissRequest = onLogoutCancel,
+            title = {
+                Text(
+                    text = "Unsaved Changes",
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = OutfitFontFamily,
+                    color = Ink
+                )
+            },
+            text = {
+                Text(
+                    text = "Some changes you made have not been saved. If you log out right now unsaved data will be lost due to no connection. Do you want to log out anyway?",
+                    color = Muted,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onLogoutConfirm) {
+                    Text("Log Out anyway", color = Orange)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onLogoutCancel) {
+                    Text("Wait", color = Green)
+                }
+            }
+        )
     }
 }
 
@@ -473,3 +509,4 @@ private fun Section(title: String, emoji: String, content: @Composable () -> Uni
         content()
     }
 }
+

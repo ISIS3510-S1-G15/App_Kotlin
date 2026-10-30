@@ -77,6 +77,7 @@ import com.uniandes.campuseats.ui.SavedView
 import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
+import com.uniandes.campuseats.net.ConnectivityObserver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -105,7 +106,7 @@ fun CampusEatsMainScreen() {
     val context = LocalContext.current
     val services = remember { AppServices.get(context) }
     val scope = rememberCoroutineScope()
-    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository))
+    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository, services.localStore, services.connectivity,  ))
     val user = auth.user
 
     when {
@@ -121,20 +122,14 @@ fun CampusEatsMainScreen() {
             CampusEatsApp(
                 services = services,
                 user = user,
-                onLogout = {
-                    scope.launch {
-                        if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
-                        services.localStore.clearUserData()
-                        auth.logout()
-                    }
-                }
+                auth = auth
             )
         }
     }
 }
 
 @Composable
-private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () -> Unit) {
+private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val localStore = services.localStore
@@ -454,6 +449,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues)) {
                 val restaurant = selectedRestaurant
+                val authViewModel = null
                 when {
                     overlay == Overlay.Detail && restaurant != null -> DetailView(
                         restaurant = restaurant,
@@ -580,8 +576,17 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         PROFILE_TAB -> ProfileView(
                             profile = profile,
                             userEmail = user.email,
+                            showLogoutWarning = auth.showLogoutWarning.collectAsState().value,
                             onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
-                            onLogout = onLogout,
+                            onLogoutAttempt = { auth.attemptLogout() },
+                            onLogoutConfirm = {
+                                scope.launch {
+                                    if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
+                                    services.localStore.clearUserData()
+                                    auth.confirmLogout()
+                                }
+                            },
+                            onLogoutCancel = { auth.cancelLogout() },
                             onBack = { selectTab(0) }
                         )
                     }
