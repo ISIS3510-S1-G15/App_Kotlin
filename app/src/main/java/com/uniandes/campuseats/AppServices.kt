@@ -9,6 +9,7 @@ import com.uniandes.campuseats.data.local.AppDatabase
 import com.uniandes.campuseats.data.local.LegacyPreferencesMigration
 import com.uniandes.campuseats.data.local.LocalStore
 import com.uniandes.campuseats.data.local.RoomDocumentCache
+import com.uniandes.campuseats.data.local.HomeFilterStore
 import com.uniandes.campuseats.data.outbox.OutboxFlusher
 import com.uniandes.campuseats.data.outbox.OutboxStore
 import com.uniandes.campuseats.data.remote.CatalogRepository
@@ -29,6 +30,7 @@ class AppServices private constructor(val appContext: Context) {
     val sessionStore = SessionStore(appContext)
     val localStore = LocalStore(AppDatabase.create(appContext))
     val documentCache = RoomDocumentCache(localStore)
+    val homeFilterStore = HomeFilterStore(appContext)
     private val migrationLock = Mutex()
     val api: RemoteApi = HttpRemoteApi(BuildConfig.API_BASE_URL) { sessionStore.token }
     val authRepository = AuthRepository(api, sessionStore)

@@ -53,6 +53,7 @@ import com.uniandes.campuseats.data.Catalog
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.emptyProfile
+import com.uniandes.campuseats.data.local.HomeFilterStore
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.attemptOrNull
@@ -125,6 +126,7 @@ fun CampusEatsMainScreen() {
                     scope.launch {
                         if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
                         services.localStore.clearUserData()
+                        services.homeFilterStore.clear()
                         auth.logout()
                     }
                 }
@@ -138,6 +140,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val localStore = services.localStore
+    var savedHome by remember { mutableStateOf(services.homeFilterStore.load()) }
     val analytics: AnalyticsViewModel = viewModel(factory = AnalyticsViewModel.factory(services))
     val sections: SectionAnalyticsViewModel = viewModel(factory = SectionAnalyticsViewModel.factory(services))
 
@@ -527,6 +530,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                             savedIds = savedIds,
                             reviews = reviews,
                             userLocation = userLocation.location,
+                            initialCategory = savedHome.category,
+                            initialFilters = savedHome.filters,
+                            onViewStateChanged = { category, filters ->
+                                services.homeFilterStore.save(category, filters)
+                                savedHome = HomeFilterStore.Saved(category, filters)
+                            },
                             onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Home) },
                             onFilterSheetOpened = { sections.onSectionShown(AppSection.Filters) },
                             onFilterSheetClosed = { sections.onSectionLeft(AppSection.Filters) },
