@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -32,6 +31,8 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.text.format.DateUtils
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.greetingFor
@@ -100,6 +102,10 @@ fun HomeView(
     onFilterSheetClosed: () -> Unit = {},
     onFiltersApplied: () -> Unit = {},
     onFiltersCleared: () -> Unit = {},
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
+    isOnline: Boolean = true,
+    lastSyncTime: Long? = null,
     modifier: Modifier = Modifier
 ) {
     val restaurants = LocalRestaurants.current
@@ -157,6 +163,7 @@ fun HomeView(
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val mealSlot = LocalMealRules.current.mealSlotFor(hour)
     val usualMealTime = mealSlot in profile.usualMealTimes
+    val pullToRefreshState = rememberPullToRefreshState()
 
     val openFilterSheet = {
         showFilters = true
@@ -173,7 +180,12 @@ fun HomeView(
 
     BackHandler(enabled = showFilters) { closeFilterSheet() }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        state = pullToRefreshState,
+        modifier = modifier.fillMaxSize()
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -299,7 +311,29 @@ fun HomeView(
                     )
                 }
             }
+            // Banner que muestra la ultima vez que los datos se actulizaron cuando no hay internet
+            if (!isOnline && lastSyncTime != null) {
+                val timeString = DateUtils.getRelativeTimeSpanString(
+                    lastSyncTime,
+                    System.currentTimeMillis(),
+                    DateUtils.MINUTE_IN_MILLIS
+                ).toString().lowercase()
 
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFFFF3CD))
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No connection. Showing data from $timeString",
+                        color = Color(0xFF856404),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
