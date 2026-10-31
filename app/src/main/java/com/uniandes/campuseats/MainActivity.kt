@@ -52,6 +52,7 @@ import com.uniandes.campuseats.auth.AuthViewModel
 import com.uniandes.campuseats.data.Catalog
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.data.ReviewRatings
 import com.uniandes.campuseats.data.emptyProfile
 import com.uniandes.campuseats.data.local.HomeFilterStore
 import com.uniandes.campuseats.data.outbox.OutboxKind
@@ -78,6 +79,8 @@ import com.uniandes.campuseats.ui.SavedView
 import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
+import com.uniandes.campuseats.ui.PartnerReportView
+import com.uniandes.campuseats.net.ConnectivityObserver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -94,8 +97,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey }
-
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport }
 private const val MAX_RECENT_SEARCHES = 5
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
@@ -106,7 +108,7 @@ fun CampusEatsMainScreen() {
     val context = LocalContext.current
     val services = remember { AppServices.get(context) }
     val scope = rememberCoroutineScope()
-    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository))
+    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository, services.localStore, services.connectivity,  ))
     val user = auth.user
 
     when {
@@ -130,13 +132,14 @@ fun CampusEatsMainScreen() {
                         auth.logout()
                     }
                 }
+                auth = auth
             )
         }
     }
 }
 
 @Composable
-private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () -> Unit) {
+private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val localStore = services.localStore
@@ -407,8 +410,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
 
     val mapVisible = overlay == null && currentTab == MAP_TAB
     val favoritesVisible = overlay == null && currentTab == FAVORITES_TAB
-    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList
-
+    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList || overlay == Overlay.PartnerReport
     SectionVisibilityEffect(AppSection.Map, mapVisible, sections)
     SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
     SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
@@ -421,9 +423,49 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         }
     }
 
-    val restaurantReviews = selectedRestaurant
+    // Obtenemos las reseñas que estan en cache
+    val cachedRestaurantReviews = selectedRestaurant
         ?.let { r -> reviews.filter { it.restaurantId == r.id } }
         .orEmpty()
+
+    // Obtenemos las reseñas que estan en el Outbox
+    var pendingReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
+
+    LaunchedEffect(outboxPending, selectedRestaurant) {
+        val pendingEntries = services.localStore.pending().filter {
+            it.request.kind == OutboxKind.REVIEW &&
+                    it.request.path.contains(selectedRestaurant?.id ?: "")
+        }
+
+        pendingReviews = pendingEntries.mapNotNull { entry ->
+            val body = entry.request.body ?: return@mapNotNull null
+            try {
+                val ratings = ReviewRatings(
+                    taste = (body["taste"] as? Number)?.toInt() ?: 0,
+                    attention = (body["attention"] as? Number)?.toInt() ?: 0,
+                    price = (body["price"] as? Number)?.toInt() ?: 0,
+                    options = (body["options"] as? Number)?.toInt() ?: 0
+                )
+
+                val rawDiets = body["dietary_options"] as? List<*>
+                val dietaryOptions = rawDiets?.map { it.toString() } ?: emptyList()
+
+                Review(
+                    id = "pending_${entry.id}",
+                    restaurantId = selectedRestaurant?.id ?: "",
+                    author = profile.name.ifEmpty { user.name },
+                    date = "Pending sync...",
+                    ratings = ratings,
+                    dietaryOptions = dietaryOptions,
+                    comment = (body["comment"] as? String).orEmpty()
+                )
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    val restaurantReviews = pendingReviews + cachedRestaurantReviews
 
     val mealRules = remember(catalog) { MealRules(catalog) }
     CompositionLocalProvider(LocalRestaurants provides restaurants, LocalCatalog provides catalog, LocalMealRules provides mealRules) {
@@ -457,6 +499,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues)) {
                 val restaurant = selectedRestaurant
+                val authViewModel = null
                 when {
                     overlay == Overlay.Detail && restaurant != null -> DetailView(
                         restaurant = restaurant,
@@ -475,6 +518,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                             sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
                             overlayStack.add(Overlay.ReviewsList)
                         },
+                        onPartnerReport = { overlayStack.add(Overlay.PartnerReport) },
                         onGetDirections = { tags ->
                             sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
                             analytics.onGoDecision(restaurant.id)
@@ -508,6 +552,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                             popOverlay()
                             overlayStack.add(Overlay.WriteReview)
                         }
+                    )
+
+                    overlay == Overlay.PartnerReport && restaurant != null -> PartnerReportView(
+                        restaurant = restaurant,
+                        loadReport = { id, days -> services.partnerReportRepository.report(id, days) },
+                        onBack = ::popOverlay
                     )
 
                     overlay == Overlay.Survey -> SurveyView(
@@ -589,8 +639,17 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         PROFILE_TAB -> ProfileView(
                             profile = profile,
                             userEmail = user.email,
+                            showLogoutWarning = auth.showLogoutWarning.collectAsState().value,
                             onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
-                            onLogout = onLogout,
+                            onLogoutAttempt = { auth.attemptLogout() },
+                            onLogoutConfirm = {
+                                scope.launch {
+                                    if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
+                                    services.localStore.clearUserData()
+                                    auth.confirmLogout()
+                                }
+                            },
+                            onLogoutCancel = { auth.cancelLogout() },
                             onBack = { selectTab(0) }
                         )
                     }
@@ -626,4 +685,4 @@ private fun SectionVisibilityEffect(section: AppSection, visible: Boolean, secti
     DisposableEffect(Unit) {
         onDispose { sections.onSectionLeft(section) }
     }
-}
+}   

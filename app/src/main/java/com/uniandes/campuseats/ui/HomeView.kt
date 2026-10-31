@@ -41,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.greetingFor
+import com.uniandes.campuseats.data.Recommendation
 import java.util.Calendar
 import android.location.Location
 import com.uniandes.campuseats.data.Restaurant
@@ -65,6 +67,8 @@ import com.uniandes.campuseats.data.recommend
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.formatDistance
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 private val Cream = Color(0xFFFBF5EE)
@@ -130,15 +134,25 @@ fun HomeView(
         return matchCategory && matchSearch && matchFilters
     }
 
-    // Sensor GPS: distancia del usuario a cada restaurante (vacío si no hay ubicación)
-    val distances = userLocation
-        ?.let { loc -> restaurants.associate { it.id to distanceMeters(loc, it) } }
-        .orEmpty()
+    val distances = remember(userLocation, restaurants) {
+        userLocation
+            ?.let { loc -> restaurants.associate { it.id to distanceMeters(loc, it) } }
+            .orEmpty()
+    }
 
     val filtered = restaurants.filter { matches(it, filters) }
 
-    // Smart feature: el mejor restaurante para este usuario, ahora mismo
-    val pick = recommend(restaurants, profile, reviews, crowding, distances).firstOrNull()
+    val reviewsSnapshot = reviews.toList()
+    val crowdingSnapshot = crowding.toMap()
+    val recommendation = produceState<Recommendation?>(
+        initialValue = null,
+        restaurants, profile, reviewsSnapshot, crowdingSnapshot, distances
+    ) {
+        value = withContext(Dispatchers.Default) {
+            recommend(restaurants, profile, reviewsSnapshot, crowdingSnapshot, distances).firstOrNull()
+        }
+    }
+    val pick = recommendation.value
     val featured = pick?.restaurant
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val mealSlot = LocalMealRules.current.mealSlotFor(hour)
