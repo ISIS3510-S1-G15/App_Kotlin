@@ -356,18 +356,21 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     // Onboarding: encuesta a pantalla completa solo la primera vez
     if (!surveyDone) {
-        Scaffold { paddingValues ->
-            Box(modifier = Modifier.padding(paddingValues)) {
-                SurveyView(
-                    isOnboarding = true,
-                    initialName = user.name,
-                    onComplete = { answers ->
-                        val completed = answers.copy(name = answers.name.ifBlank { user.name })
-                        profile = completed
-                        surveyDone = true
-                        scope.launch { services.profileSynchronizer.update(completed) }
-                    }
-                )
+        // Proveemos el catalogo ANTES de dibujar la vista
+        CompositionLocalProvider(LocalCatalog provides catalog) {
+            Scaffold { paddingValues ->
+                Box(modifier = Modifier.padding(paddingValues)) {
+                    SurveyView(
+                        isOnboarding = true,
+                        initialName = user.name,
+                        onComplete = { answers ->
+                            val completed = answers.copy(name = answers.name.ifBlank { user.name })
+                            profile = completed
+                            surveyDone = true
+                            scope.launch { services.profileSynchronizer.update(completed) }
+                        }
+                    )
+                }
             }
         }
         return
