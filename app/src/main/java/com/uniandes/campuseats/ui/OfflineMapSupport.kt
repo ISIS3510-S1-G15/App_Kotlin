@@ -48,7 +48,7 @@ object OfflineMap {
     }
 
     fun applyConnectivity(mapView: MapView, online: Boolean) {
-        if (mapView.isUseDataConnection() != online) mapView.setUseDataConnection(online)
+        mapView.setUseDataConnection(online)
     }
 
     fun prefetchCampus(mapView: MapView) {
