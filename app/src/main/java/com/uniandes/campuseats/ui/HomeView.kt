@@ -327,7 +327,7 @@ fun HomeView(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No conection. Showing data from $timeString",
+                        text = "No connection. Showing data from $timeString",
                         color = Color(0xFF856404),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold

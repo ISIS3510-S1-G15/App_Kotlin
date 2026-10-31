@@ -38,8 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalWindowInfo
 import com.uniandes.campuseats.analytics.AnalyticsScreen
 import com.uniandes.campuseats.analytics.AnalyticsViewModel
 import com.uniandes.campuseats.analytics.AppSection
@@ -59,7 +58,6 @@ import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
-import com.uniandes.campuseats.sensor.findLifecycleOwner
 import com.uniandes.campuseats.sensor.rememberUserLocation
 import com.uniandes.campuseats.ui.ConnectionErrorView
 import com.uniandes.campuseats.ui.CrowdingModal
@@ -80,10 +78,10 @@ import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
 import com.uniandes.campuseats.ui.PartnerReportView
-import com.uniandes.campuseats.net.ConnectivityObserver
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,7 +105,6 @@ private const val PROFILE_TAB = 4
 fun CampusEatsMainScreen() {
     val context = LocalContext.current
     val services = remember { AppServices.get(context) }
-    val scope = rememberCoroutineScope()
     val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository, services.localStore, services.connectivity,  ))
     val user = auth.user
 
@@ -162,7 +159,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var loadFailed by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var outboxPending by remember { mutableIntStateOf(0) }
-    val online by services.connectivity.online.collectAsState()
+    val connectivityManager = remember { context.getSystemService(ConnectivityManager::class.java) }
+    var online by remember { mutableStateOf(services.connectivity.online.value) }
     var lastSyncTime by remember { mutableStateOf<Long?>(null) }
 
     suspend fun refreshRestaurants(force: Boolean = false) {
@@ -246,13 +244,18 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         }
     }
 
-    val lifecycleOwner = remember(context) { context.findLifecycleOwner() }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && startupDone) scope.launch { refreshStale() }
+    val windowInfo = LocalWindowInfo.current
+    LaunchedEffect(windowInfo.isWindowFocused) {
+        if (windowInfo.isWindowFocused) {
+            val network = connectivityManager.activeNetwork
+            val caps = connectivityManager.getNetworkCapabilities(network)
+            // Comprobar que si hay internet
+            val isReallyOnline = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+
+            online = isReallyOnline
+
+            if (startupDone && isReallyOnline) scope.launch { refreshStale() }
         }
-        lifecycleOwner?.lifecycle?.addObserver(observer)
-        onDispose { lifecycleOwner?.lifecycle?.removeObserver(observer) }
     }
 
     fun recordRecentSearch(name: String) {
@@ -322,6 +325,10 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         catalogResolved = !catalog.isEmpty
         lastSyncTime = services.localStore.loadDocument("last_sync")?.fetchedAt
         loadRemote()
+    }
+
+    LaunchedEffect(Unit) {
+        services.connectivity.online.collect { online = it }
     }
 
     // Sensor GPS: se pide el permiso al terminar el onboarding y se comparte con las pantallas
@@ -501,7 +508,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues)) {
                 val restaurant = selectedRestaurant
-                val authViewModel = null
                 when {
                     overlay == Overlay.Detail && restaurant != null -> DetailView(
                         restaurant = restaurant,
