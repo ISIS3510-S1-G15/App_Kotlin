@@ -20,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
@@ -300,11 +302,12 @@ fun ReviewsListView(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReviewCard(review: Review) {
+    val isPending = review.date == "Pending sync..."
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(Color.White)
+            .background(if (isPending) Cream else Color.White)
             .border(1.dp, Line, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
@@ -337,7 +340,16 @@ private fun ReviewCard(review: Review) {
                 }
                 Column {
                     Text(text = review.author, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text(text = formatDate(review.date), color = LightMuted, fontSize = 10.sp)
+
+                    if (isPending) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CloudUpload, null, tint = Orange, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "Pending Syng", color = Orange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Text(text = formatDate(review.date), color = LightMuted, fontSize = 10.sp)
+                    }
                 }
             }
             Row(

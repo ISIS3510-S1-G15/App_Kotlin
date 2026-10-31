@@ -52,6 +52,7 @@ import com.uniandes.campuseats.auth.AuthViewModel
 import com.uniandes.campuseats.data.Catalog
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.data.ReviewRatings
 import com.uniandes.campuseats.data.emptyProfile
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
@@ -78,6 +79,7 @@ import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
 import com.uniandes.campuseats.ui.PartnerReportView
+import com.uniandes.campuseats.net.ConnectivityObserver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -105,7 +107,7 @@ fun CampusEatsMainScreen() {
     val context = LocalContext.current
     val services = remember { AppServices.get(context) }
     val scope = rememberCoroutineScope()
-    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository))
+    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository, services.localStore, services.connectivity,  ))
     val user = auth.user
 
     when {
@@ -121,20 +123,14 @@ fun CampusEatsMainScreen() {
             CampusEatsApp(
                 services = services,
                 user = user,
-                onLogout = {
-                    scope.launch {
-                        if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
-                        services.localStore.clearUserData()
-                        auth.logout()
-                    }
-                }
+                auth = auth
             )
         }
     }
 }
 
 @Composable
-private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () -> Unit) {
+private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val localStore = services.localStore
@@ -417,9 +413,49 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         }
     }
 
-    val restaurantReviews = selectedRestaurant
+    // Obtenemos las reseñas que estan en cache
+    val cachedRestaurantReviews = selectedRestaurant
         ?.let { r -> reviews.filter { it.restaurantId == r.id } }
         .orEmpty()
+
+    // Obtenemos las reseñas que estan en el Outbox
+    var pendingReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
+
+    LaunchedEffect(outboxPending, selectedRestaurant) {
+        val pendingEntries = services.localStore.pending().filter {
+            it.request.kind == OutboxKind.REVIEW &&
+                    it.request.path.contains(selectedRestaurant?.id ?: "")
+        }
+
+        pendingReviews = pendingEntries.mapNotNull { entry ->
+            val body = entry.request.body ?: return@mapNotNull null
+            try {
+                val ratings = ReviewRatings(
+                    taste = (body["taste"] as? Number)?.toInt() ?: 0,
+                    attention = (body["attention"] as? Number)?.toInt() ?: 0,
+                    price = (body["price"] as? Number)?.toInt() ?: 0,
+                    options = (body["options"] as? Number)?.toInt() ?: 0
+                )
+
+                val rawDiets = body["dietary_options"] as? List<*>
+                val dietaryOptions = rawDiets?.map { it.toString() } ?: emptyList()
+
+                Review(
+                    id = "pending_${entry.id}",
+                    restaurantId = selectedRestaurant?.id ?: "",
+                    author = profile.name.ifEmpty { user.name },
+                    date = "Pending sync...",
+                    ratings = ratings,
+                    dietaryOptions = dietaryOptions,
+                    comment = (body["comment"] as? String).orEmpty()
+                )
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    val restaurantReviews = pendingReviews + cachedRestaurantReviews
 
     val mealRules = remember(catalog) { MealRules(catalog) }
     CompositionLocalProvider(LocalRestaurants provides restaurants, LocalCatalog provides catalog, LocalMealRules provides mealRules) {
@@ -453,6 +489,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues)) {
                 val restaurant = selectedRestaurant
+                val authViewModel = null
                 when {
                     overlay == Overlay.Detail && restaurant != null -> DetailView(
                         restaurant = restaurant,
@@ -586,8 +623,17 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, onLogout: () ->
                         PROFILE_TAB -> ProfileView(
                             profile = profile,
                             userEmail = user.email,
+                            showLogoutWarning = auth.showLogoutWarning.collectAsState().value,
                             onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
-                            onLogout = onLogout,
+                            onLogoutAttempt = { auth.attemptLogout() },
+                            onLogoutConfirm = {
+                                scope.launch {
+                                    if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
+                                    services.localStore.clearUserData()
+                                    auth.confirmLogout()
+                                }
+                            },
+                            onLogoutCancel = { auth.cancelLogout() },
                             onBack = { selectTab(0) }
                         )
                     }
