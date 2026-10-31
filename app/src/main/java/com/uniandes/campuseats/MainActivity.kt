@@ -124,14 +124,6 @@ fun CampusEatsMainScreen() {
             CampusEatsApp(
                 services = services,
                 user = user,
-                onLogout = {
-                    scope.launch {
-                        if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
-                        services.localStore.clearUserData()
-                        services.homeFilterStore.clear()
-                        auth.logout()
-                    }
-                }
                 auth = auth
             )
         }
@@ -171,6 +163,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var refreshing by remember { mutableStateOf(false) }
     var outboxPending by remember { mutableIntStateOf(0) }
     val online by services.connectivity.online.collectAsState()
+    var lastSyncTime by remember { mutableStateOf<Long?>(null) }
 
     suspend fun refreshRestaurants(force: Boolean = false) {
         val fetched = attemptOrNull { services.restaurantRepository.revalidate(force) }?.takeIf { it.isNotEmpty() }
@@ -227,19 +220,27 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (services.connectivity.online.value) flushOutbox()
     }
 
-    suspend fun refreshStale() {
+    suspend fun refreshStale(force: Boolean = false) {
         flushOutbox()
         if (refreshing) return
         refreshing = true
         try {
             coroutineScope {
-                launch { refreshRestaurants() }
-                launch { refreshCatalog() }
+                launch { refreshRestaurants(force) }
+                launch { refreshCatalog(force) }
             }
             coroutineScope {
-                launch { refreshReviews() }
-                launch { refreshCrowding() }
+                launch { refreshReviews(force) }
+                launch { refreshCrowding(force) }
             }
+
+            // Se guarda la hora si hay internet y se trajeron los datos
+            if (services.connectivity.online.value) {
+                val now = System.currentTimeMillis()
+                services.localStore.saveDocument("last_sync", "ok", now)
+                lastSyncTime = now
+            }
+
         } finally {
             refreshing = false
         }
@@ -319,6 +320,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         profileResolved = surveyDone
         restaurantsResolved = restaurants.isNotEmpty()
         catalogResolved = !catalog.isEmpty
+        lastSyncTime = services.localStore.loadDocument("last_sync")?.fetchedAt
         loadRemote()
     }
 
@@ -594,7 +596,22 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             },
                             onFiltersCleared = {
                                 sections.onInteraction(AppSection.Filters, SectionAction.FiltersCleared)
-                            }
+                            },
+                            isRefreshing = refreshing,
+                            onRefresh = {
+                                // Para que sea mas informativo verificamos la conexion antes de forzar la recarga
+                                if (services.connectivity.online.value) {
+                                    scope.launch { refreshStale(force = true) }
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "You are offline. Showing saved data.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            isOnline = online,
+                            lastSyncTime = lastSyncTime
                         )
                         1 -> SearchView(
                             onSelect = {
@@ -646,6 +663,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                                 scope.launch {
                                     if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
                                     services.localStore.clearUserData()
+                                    services.homeFilterStore.clear()
                                     auth.confirmLogout()
                                 }
                             },
