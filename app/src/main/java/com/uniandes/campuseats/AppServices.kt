@@ -45,7 +45,7 @@ class AppServices private constructor(val appContext: Context) {
     val reviewRepository = ReviewRepository(api, documentCache)
     val catalogRepository = CatalogRepository(api, documentCache)
     val occupancyRepository = OccupancyRepository(api, documentCache)
-    val partnerReportRepository = PartnerReportRepository(api)
+    val partnerReportRepository = PartnerReportRepository(api, documentCache)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)
 
     suspend fun prepareLocalData() = migrationLock.withLock {

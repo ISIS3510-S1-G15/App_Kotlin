@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.remote.PartnerReport
+import com.uniandes.campuseats.data.remote.PartnerReportResult
+import kotlinx.coroutines.flow.Flow
 import com.uniandes.campuseats.net.ApiException
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 import java.util.Locale
@@ -51,34 +53,46 @@ private val Gold = Color(0xFFF4A735)
 
 private val PERIODS = listOf(7, 30, 90)
 
+private fun ageLabel(fetchedAt: Long?): String {
+    if (fetchedAt == null) return ""
+    val minutes = ((System.currentTimeMillis() - fetchedAt) / 60_000).coerceAtLeast(0)
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "$minutes min ago"
+        else -> "${minutes / 60} h ago"
+    }
+}
+
 private sealed interface ReportState {
     data object Loading : ReportState
     data class Error(val message: String) : ReportState
-    data class Ready(val report: PartnerReport) : ReportState
+    data class Ready(val result: PartnerReportResult) : ReportState
 }
 
 @Composable
 fun PartnerReportView(
     restaurant: Restaurant,
-    loadReport: suspend (restaurantId: String, days: Int) -> PartnerReport,
+    loadReport: (restaurantId: String, days: Int, force: Boolean) -> Flow<PartnerReportResult>,
     onBack: () -> Unit
 ) {
     var days by remember { mutableIntStateOf(30) }
+    var refreshTick by remember { mutableIntStateOf(0) }
     var state by remember { mutableStateOf<ReportState>(ReportState.Loading) }
 
-    LaunchedEffect(restaurant.id, days) {
-        state = ReportState.Loading
-        state = try {
-            ReportState.Ready(loadReport(restaurant.id, days))
+    LaunchedEffect(restaurant.id, days, refreshTick) {
+        val showing = (state as? ReportState.Ready)?.result?.report?.periodDays
+        if (showing != days) state = ReportState.Loading
+        try {
+            loadReport(restaurant.id, days, refreshTick > 0).collect { state = ReportState.Ready(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {
-            ReportState.Error(
+            state = ReportState.Error(
                 if (e.statusCode == 403) "Your account doesn't have access to partner reports."
                 else e.detail ?: "Couldn't load the report."
             )
         } catch (e: Exception) {
-            ReportState.Error("Couldn't load the report. Check your connection.")
+            state = ReportState.Error("Couldn't load the report. Check your connection.")
         }
     }
 
@@ -135,7 +149,34 @@ fun PartnerReportView(
             is ReportState.Error -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
                 Text(current.message, color = Red, fontSize = 14.sp, fontFamily = OutfitFontFamily)
             }
-            is ReportState.Ready -> ReportBody(current.report)
+            is ReportState.Ready -> {
+                val result = current.result
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = when {
+                            result.refreshFailed -> "Offline · showing saved data from ${ageLabel(result.fetchedAt)}"
+                            result.fromCache -> "Saved data · ${ageLabel(result.fetchedAt)}"
+                            else -> "Updated ${ageLabel(result.fetchedAt)}"
+                        },
+                        color = if (result.refreshFailed) Red else Muted,
+                        fontSize = 11.sp,
+                        fontFamily = OutfitFontFamily
+                    )
+                    Text(
+                        text = "Refresh",
+                        color = Orange,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = OutfitFontFamily,
+                        modifier = Modifier.clickable { refreshTick++ }
+                    )
+                }
+                ReportBody(result.report)
+            }
         }
     }
 }

@@ -564,7 +564,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
                     overlay == Overlay.PartnerReport && restaurant != null -> PartnerReportView(
                         restaurant = restaurant,
-                        loadReport = { id, days -> services.partnerReportRepository.report(id, days) },
+                        loadReport = { id, days, force ->
+                            services.partnerReportRepository.load(id, days, user.id, force)
+                        },
                         onBack = ::popOverlay
                     )
 
@@ -709,4 +711,4 @@ private fun SectionVisibilityEffect(section: AppSection, visible: Boolean, secti
     DisposableEffect(Unit) {
         onDispose { sections.onSectionLeft(section) }
     }
-}   
+}
