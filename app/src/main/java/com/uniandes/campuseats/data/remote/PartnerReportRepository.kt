@@ -1,6 +1,14 @@
 package com.uniandes.campuseats.data.remote
 
+import com.uniandes.campuseats.data.cache.CacheKeys
+import com.uniandes.campuseats.data.cache.CachePolicy
+import com.uniandes.campuseats.data.cache.CacheTtl
+import com.uniandes.campuseats.data.cache.DocumentCache
 import com.uniandes.campuseats.net.RemoteApi
+import com.uniandes.campuseats.net.attemptOrNull
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import org.json.JSONObject
 
 data class PartnerComplaint(val label: String, val mentions: Int, val sharePct: Double)
@@ -14,7 +22,7 @@ data class PartnerReport(
     val viewsChangePct: Double?,
     val reviewCount: Int,
     val avgOverall: Double?,
-    val sentimentLabel: String, 
+    val sentimentLabel: String,
     val positivePct: Double,
     val neutralPct: Double,
     val negativePct: Double,
@@ -52,8 +60,52 @@ fun parsePartnerReport(json: JSONObject): PartnerReport {
     )
 }
 
+data class PartnerReportResult(
+    val report: PartnerReport,
+    val fromCache: Boolean,
+    val fetchedAt: Long?,
+    val refreshFailed: Boolean = false
+)
 
-class PartnerReportRepository(private val api: RemoteApi) {
-    suspend fun report(restaurantId: String, days: Int = 30): PartnerReport =
-        parsePartnerReport(api.get("/analytics/partner-report/$restaurantId?days=$days"))
+class PartnerReportRepository(
+    private val api: RemoteApi,
+    private val cache: DocumentCache,
+    private val policy: CachePolicy = CachePolicy()
+) {
+
+    suspend fun fetch(restaurantId: String, days: Int, userId: Int): PartnerReport {
+        val json = api.get("/analytics/partner-report/$restaurantId?days=$days")
+        val report = parsePartnerReport(json)
+        attemptOrNull { cache.save(CacheKeys.partnerReport(userId, restaurantId, days), json.toString(), policy.now()) }
+        return report
+    }
+
+    private suspend fun cached(key: String): PartnerReportResult? {
+        val raw = attemptOrNull { cache.load(key) }?.takeIf { it.isNotBlank() } ?: return null
+        val report = attemptOrNull { parsePartnerReport(JSONObject(raw)) }
+        if (report == null) {
+            attemptOrNull { cache.clear(key) }
+            return null
+        }
+        return PartnerReportResult(report, fromCache = true, fetchedAt = attemptOrNull { cache.fetchedAt(key) })
+    }
+
+    fun load(restaurantId: String, days: Int, userId: Int, force: Boolean = false): Flow<PartnerReportResult> = flow {
+        val key = CacheKeys.partnerReport(userId, restaurantId, days)
+        val stored = cached(key)
+        if (stored != null) emit(stored)
+
+        val fresh = !force && stored != null &&
+            policy.isFreshOrFalse(cache, key, CacheTtl.PARTNER_REPORT)
+        if (fresh) return@flow
+
+        try {
+            emit(PartnerReportResult(fetch(restaurantId, days, userId), fromCache = false, fetchedAt = policy.now()))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (stored == null) throw e
+            emit(stored.copy(refreshFailed = true))
+        }
+    }
 }

@@ -15,6 +15,7 @@ object CacheTtl {
     const val REVIEWS = 10 * 60 * 1000L
     const val REVIEW_SUMMARIES = 10 * 60 * 1000L
     const val OCCUPANCY = 2 * 60 * 1000L
+    const val PARTNER_REPORT = 15 * 60 * 1000L
 }
 
 object CacheKeys {
@@ -25,6 +26,7 @@ object CacheKeys {
     const val OCCUPANCY = "occupancy.v$SCHEMA_VERSION"
 
     fun reviews(restaurantId: String) = "reviews.v$SCHEMA_VERSION.$restaurantId"
+    fun partnerReport(userId: Int, restaurantId: String, days: Int) = "partner_report.v$SCHEMA_VERSION.$userId.$restaurantId.$days"
 }
 
 class CachePolicy(private val clock: () -> Long = System::currentTimeMillis) {
