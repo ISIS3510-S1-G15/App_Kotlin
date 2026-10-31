@@ -1,7 +1,10 @@
+import com.google.firebase.appdistribution.gradle.firebaseAppDistribution
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.firebase.appdistribution)
+    alias(libs.plugins.google.gms.google.services)
 }
 
 android {
@@ -25,11 +28,13 @@ android {
 
     buildTypes {
         release {
-            optimization {
-                enable = false
+            firebaseAppDistribution {
+                releaseNotesFile="/path/to/releasenotes.txt"
+                testers="ali@example.com, bri@example.com, cal@example.com"
             }
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
