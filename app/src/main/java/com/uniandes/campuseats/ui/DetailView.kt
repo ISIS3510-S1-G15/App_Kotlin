@@ -265,7 +265,7 @@ fun DetailView(
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { context ->
-                            Configuration.getInstance().userAgentValue = context.packageName
+                            OfflineMap.configure(context)
 
                             MapView(context).apply {
                                 setMultiTouchControls(true)

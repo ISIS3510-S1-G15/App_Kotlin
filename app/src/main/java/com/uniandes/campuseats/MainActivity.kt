@@ -653,7 +653,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             },
                             onMarkerSelected = {
                                 sections.onInteraction(AppSection.Map, SectionAction.MarkerSelected)
-                            }
+                            },
+                            isOnline = online
                         )
                         FAVORITES_TAB -> SavedView(
                             onSelect = {

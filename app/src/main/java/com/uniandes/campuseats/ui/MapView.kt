@@ -111,7 +111,8 @@ fun MapView(
     hasLocationPermission: Boolean = true,
     onRetryLocation: () -> Unit = {},
     onFilterUsed: (String) -> Unit = {},
-    onMarkerSelected: () -> Unit = {}
+    onMarkerSelected: () -> Unit = {},
+    isOnline: Boolean = true
 ) {
     val restaurants = LocalRestaurants.current
     val mealRules = LocalMealRules.current
@@ -246,7 +247,7 @@ fun MapView(
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context ->
-                    Configuration.getInstance().userAgentValue = context.packageName
+                    OfflineMap.configure(context)
 
                     OsmMapView(context).apply {
                         setMultiTouchControls(true)
@@ -255,6 +256,8 @@ fun MapView(
                     }
                 },
                 update = { mapView ->
+                    OfflineMap.applyConnectivity(mapView, isOnline)
+                    if (isOnline) OfflineMap.prefetchCampus(mapView)
                     mapView.overlays.clear()
 
                     // 1. Dibujamos los pines
@@ -308,6 +311,10 @@ fun MapView(
                     mapView.invalidate()
                 }
             )
+
+            if (!isOnline) {
+                OfflineMapNotice(Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
+            }
 
             Column(
                 modifier = Modifier
