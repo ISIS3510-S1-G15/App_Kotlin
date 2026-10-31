@@ -78,6 +78,7 @@ import com.uniandes.campuseats.ui.SavedView
 import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
+import com.uniandes.campuseats.ui.PartnerReportView
 import com.uniandes.campuseats.net.ConnectivityObserver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
@@ -95,8 +96,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey }
-
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport }
 private const val MAX_RECENT_SEARCHES = 5
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
@@ -400,8 +400,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     val mapVisible = overlay == null && currentTab == MAP_TAB
     val favoritesVisible = overlay == null && currentTab == FAVORITES_TAB
-    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList
-
+    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList || overlay == Overlay.PartnerReport
     SectionVisibilityEffect(AppSection.Map, mapVisible, sections)
     SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
     SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
@@ -509,6 +508,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
                             overlayStack.add(Overlay.ReviewsList)
                         },
+                        onPartnerReport = { overlayStack.add(Overlay.PartnerReport) },
                         onGetDirections = { tags ->
                             sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
                             analytics.onGoDecision(restaurant.id)
@@ -542,6 +542,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             popOverlay()
                             overlayStack.add(Overlay.WriteReview)
                         }
+                    )
+
+                    overlay == Overlay.PartnerReport && restaurant != null -> PartnerReportView(
+                        restaurant = restaurant,
+                        loadReport = { id, days -> services.partnerReportRepository.report(id, days) },
+                        onBack = ::popOverlay
                     )
 
                     overlay == Overlay.Survey -> SurveyView(
@@ -663,4 +669,4 @@ private fun SectionVisibilityEffect(section: AppSection, visible: Boolean, secti
     DisposableEffect(Unit) {
         onDispose { sections.onSectionLeft(section) }
     }
-}
+}   

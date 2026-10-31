@@ -18,6 +18,7 @@ import com.uniandes.campuseats.data.remote.ProfileSynchronizer
 import com.uniandes.campuseats.data.remote.RestaurantRepository
 import com.uniandes.campuseats.data.remote.ReviewRepository
 import com.uniandes.campuseats.data.remote.SavedRepository
+import com.uniandes.campuseats.data.remote.PartnerReportRepository
 import com.uniandes.campuseats.net.ConnectivityMonitor
 import com.uniandes.campuseats.net.ConnectivityObserver
 import com.uniandes.campuseats.net.HttpRemoteApi
@@ -42,6 +43,7 @@ class AppServices private constructor(val appContext: Context) {
     val reviewRepository = ReviewRepository(api, documentCache)
     val catalogRepository = CatalogRepository(api, documentCache)
     val occupancyRepository = OccupancyRepository(api, documentCache)
+    val partnerReportRepository = PartnerReportRepository(api)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)
 
     suspend fun prepareLocalData() = migrationLock.withLock {
