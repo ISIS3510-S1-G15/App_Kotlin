@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation("androidx.security:security-crypto:1.1.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.room.runtime)
