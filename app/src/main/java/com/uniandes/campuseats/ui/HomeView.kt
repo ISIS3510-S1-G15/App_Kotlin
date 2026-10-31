@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,6 +92,9 @@ fun HomeView(
     savedIds: Set<String>,
     reviews: List<Review>,
     userLocation: Location?,
+    initialCategory: String = "All",
+    initialFilters: HomeFilters = HomeFilters(),
+    onViewStateChanged: (category: String, filters: HomeFilters) -> Unit = { _, _ -> },
     onFilterUsed: (String) -> Unit = {},
     onFilterSheetOpened: () -> Unit = {},
     onFilterSheetClosed: () -> Unit = {},
@@ -101,8 +105,12 @@ fun HomeView(
     val restaurants = LocalRestaurants.current
     val categories = remember(restaurants) { listOf("All") + restaurants.map { it.category }.distinct() }
     var search by remember { mutableStateOf("") }
-    var activeCategory by remember { mutableStateOf("All") }
-    var filters by remember { mutableStateOf(HomeFilters()) }
+    var activeCategory by remember { mutableStateOf(initialCategory) }
+    var filters by remember { mutableStateOf(initialFilters) }
+    LaunchedEffect(activeCategory, filters) { onViewStateChanged(activeCategory, filters) }
+    LaunchedEffect(categories) {
+        if (restaurants.isNotEmpty() && activeCategory !in categories) activeCategory = "All"
+    }
     var showFilters by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
