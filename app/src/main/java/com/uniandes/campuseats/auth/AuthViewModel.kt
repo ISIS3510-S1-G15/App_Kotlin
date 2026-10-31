@@ -61,17 +61,22 @@ class AuthViewModel(
     // Para Eventual Connectivity. Muestra una alerta de que hay datos que no se han sincronizado antes de cerrar sesion si los hay
     fun attemptLogout() {
         viewModelScope.launch {
-            val pendingItemsCount = localStore.count()
+            val outboxCount = localStore.count()
+
+            val profileRecord = localStore.loadProfileRecord()
+            val hasPendingProfile = profileRecord?.pendingSync == true
+
             val isOnline = connectivityObserver.online.value
 
-            if (!isOnline && pendingItemsCount > 0) {
+            Log.d("TEST_LOGOUT", "Internet: $isOnline | Outbox: $outboxCount | Perfil Pendiente: $hasPendingProfile")
+
+            if (!isOnline && (outboxCount > 0 || hasPendingProfile)) {
                 _showLogoutWarning.value = true
             } else {
                 confirmLogout()
             }
         }
     }
-
     fun confirmLogout() {
         _showLogoutWarning.value = false
         repository.logout()
@@ -80,11 +85,6 @@ class AuthViewModel(
 
     fun cancelLogout() {
         _showLogoutWarning.value = false
-    }
-
-    fun logout() {
-        repository.logout()
-        user = null
     }
 
     fun clearError() {
