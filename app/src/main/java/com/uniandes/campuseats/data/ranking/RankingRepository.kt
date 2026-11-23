@@ -19,6 +19,7 @@ class RankingRepository(
     private val reviews: ReviewRepository,
     private val occupancy: OccupancyRepository,
     private val localStore: LocalStore,
+    private val cache: RankingCache = RankingCache(),
     private val clock: () -> Long = System::currentTimeMillis
 ) {
 
@@ -27,15 +28,29 @@ class RankingRepository(
         if (refresh) refreshSources()
         val refreshedAt = System.nanoTime()
         val inputs = gatherInputs()
+        val fingerprint = RankingFingerprint.of(inputs, window)
         val gatheredAt = System.nanoTime()
+
+        cache.get(criterion, window, fingerprint)?.let { cached ->
+            Log.d(
+                TAG,
+                "cache=HIT inputs=${millis(gatheredAt - refreshedAt)}ms hits=${cache.hits} misses=${cache.misses} entries=${cache.size()}"
+            )
+            return cached
+        }
+
         val all = RankingEngine.computeAll(inputs, window)
         val computedAt = System.nanoTime()
+        val now = clock()
+        val results = all.map { (key, items) -> RankingResult(key, window, items, now, fromSnapshot = false) }
+        cache.putAll(results, fingerprint)
         Log.d(
             TAG,
-            "refresh=${millis(refreshedAt - startedAt)}ms inputs=${millis(gatheredAt - refreshedAt)}ms " +
-                "compute=${millis(computedAt - gatheredAt)}ms restaurants=${inputs.restaurants.size} reviews=${inputs.reviews.size}"
+            "cache=MISS refresh=${millis(refreshedAt - startedAt)}ms inputs=${millis(gatheredAt - refreshedAt)}ms " +
+                "compute=${millis(computedAt - gatheredAt)}ms hits=${cache.hits} misses=${cache.misses} " +
+                "restaurants=${inputs.restaurants.size} reviews=${inputs.reviews.size}"
         )
-        return RankingResult(criterion, window, all[criterion].orEmpty(), clock(), fromSnapshot = false)
+        return results.first { it.criterion == criterion }
     }
 
     private suspend fun refreshSources() = coroutineScope {
