@@ -73,17 +73,23 @@ private sealed interface ReportState {
 fun PartnerReportView(
     restaurant: Restaurant,
     loadReport: (restaurantId: String, days: Int, force: Boolean) -> Flow<PartnerReportResult>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    isOnline: Boolean = true
 ) {
     var days by remember { mutableIntStateOf(30) }
     var refreshTick by remember { mutableIntStateOf(0) }
+    // Solo el boton Refresh fuerza red; cambiar de periodo o reconectar respeta el cache vigente
+    var forceNext by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<ReportState>(ReportState.Loading) }
 
-    LaunchedEffect(restaurant.id, days, refreshTick) {
+    // isOnline como llave: al recuperar la conexion se reintenta solo (si hubo error) o se revalida lo viejo
+    LaunchedEffect(restaurant.id, days, refreshTick, isOnline) {
         val showing = (state as? ReportState.Ready)?.result?.report?.periodDays
         if (showing != days) state = ReportState.Loading
         try {
-            loadReport(restaurant.id, days, refreshTick > 0).collect { state = ReportState.Ready(it) }
+            val force = forceNext
+            forceNext = false
+            loadReport(restaurant.id, days, force).collect { state = ReportState.Ready(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {
@@ -147,7 +153,20 @@ fun PartnerReportView(
                 Text("Loading report…", color = Muted, fontFamily = OutfitFontFamily)
             }
             is ReportState.Error -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
-                Text(current.message, color = Red, fontSize = 14.sp, fontFamily = OutfitFontFamily)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(current.message, color = Red, fontSize = 14.sp, fontFamily = OutfitFontFamily)
+                    Text(
+                        text = "Retry",
+                        color = Orange,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = OutfitFontFamily,
+                        modifier = Modifier.clickable {
+                            forceNext = true
+                            refreshTick++
+                        }
+                    )
+                }
             }
             is ReportState.Ready -> {
                 val result = current.result
@@ -172,7 +191,10 @@ fun PartnerReportView(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = OutfitFontFamily,
-                        modifier = Modifier.clickable { refreshTick++ }
+                        modifier = Modifier.clickable {
+                            forceNext = true
+                            refreshTick++
+                        }
                     )
                 }
                 ReportBody(result.report)

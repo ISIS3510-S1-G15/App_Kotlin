@@ -70,16 +70,22 @@ private const val MAX_COMMENT = 300
 
 /** Encuesta de calificación del restaurante: 4 categorías con estrellas, dietas y comentario. */
 @OptIn(ExperimentalLayoutApi::class)
+private val REVIEW_CATEGORY_KEYS = listOf("taste", "attention", "price", "options")
+
 @Composable
 fun WriteReviewView(
     restaurant: Restaurant,
     authorName: String,
     onSubmit: (Review) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    isOnline: Boolean = true
 ) {
     val catalog = LocalCatalog.current
     val dietaryChoices = catalog.labels("review_dietary_options")
-    val ratingLabels = catalog.options("review_categories").map { it.value to it.label }
+    // El modelo de resena tiene exactamente estas 4 categorias; si el catalogo del servidor cambia o falta una,
+    // se usa un nombre por defecto en vez de reventar con NoSuchElementException.
+    val catalogLabels = catalog.options("review_categories").associate { it.value to it.label }
+    val ratingLabels = REVIEW_CATEGORY_KEYS.map { key -> key to (catalogLabels[key] ?: key.replaceFirstChar { it.uppercase() }) }
     var ratings by remember { mutableStateOf(mapOf("taste" to 0, "attention" to 0, "price" to 0, "options" to 0)) }
     var dietaryOptions by remember { mutableStateOf(listOf<String>()) }
     var comment by remember { mutableStateOf("") }
@@ -89,7 +95,7 @@ fun WriteReviewView(
     val avgRating = if (allRated) String.format(Locale.US, "%.1f", ratings.values.average()) else "—"
 
     if (submitted) {
-        SubmittedScreen(restaurantName = restaurant.name, avgRating = avgRating, onBack = onBack)
+        SubmittedScreen(restaurantName = restaurant.name, avgRating = avgRating, queuedOffline = !isOnline, onBack = onBack)
         return
     }
 
@@ -137,7 +143,7 @@ fun WriteReviewView(
                 CardTitle("Rate your experience", bottom = 16.dp)
                 Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                     ratingLabels.forEach { (key, label) ->
-                        val value = ratings.getValue(key)
+                        val value = ratings[key] ?: 0
                         Column {
                             Row(
                                 modifier = Modifier
@@ -267,10 +273,10 @@ fun WriteReviewView(
                                 author = authorName.ifBlank { "Anonymous" },
                                 date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
                                 ratings = ReviewRatings(
-                                    taste = ratings.getValue("taste"),
-                                    attention = ratings.getValue("attention"),
-                                    price = ratings.getValue("price"),
-                                    options = ratings.getValue("options")
+                                    taste = ratings["taste"] ?: 0,
+                                    attention = ratings["attention"] ?: 0,
+                                    price = ratings["price"] ?: 0,
+                                    options = ratings["options"] ?: 0
                                 ),
                                 dietaryOptions = dietaryOptions,
                                 comment = comment.trim()
@@ -292,7 +298,7 @@ fun WriteReviewView(
 }
 
 @Composable
-private fun SubmittedScreen(restaurantName: String, avgRating: String, onBack: () -> Unit) {
+private fun SubmittedScreen(restaurantName: String, avgRating: String, queuedOffline: Boolean, onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -313,7 +319,7 @@ private fun SubmittedScreen(restaurantName: String, avgRating: String, onBack: (
         }
         Spacer(modifier = Modifier.height(20.dp))
         Text(
-            text = "¡Gracias!",
+            text = "Thank you!",
             color = Ink,
             fontSize = 24.sp,
             fontWeight = FontWeight.Black,
@@ -323,7 +329,7 @@ private fun SubmittedScreen(restaurantName: String, avgRating: String, onBack: (
             text = buildAnnotatedString {
                 append("Your review of ")
                 withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = Ink)) { append(restaurantName) }
-                append(" has been submitted.")
+                append(if (queuedOffline) " is saved and will be posted when you're back online." else " has been submitted.")
             },
             color = Muted,
             fontSize = 13.sp,

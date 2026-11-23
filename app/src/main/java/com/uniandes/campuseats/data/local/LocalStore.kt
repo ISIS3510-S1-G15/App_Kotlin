@@ -5,7 +5,9 @@ import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.ReviewRatings
 import com.uniandes.campuseats.data.outbox.OutboxCodec
+import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.data.outbox.OutboxEntry
+import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.data.outbox.OutboxStore
 import com.uniandes.campuseats.data.remote.ProfileLocalSource
@@ -73,13 +75,33 @@ class LocalStore(
         }
     }
 
+    /**
+     * Borra todo lo que pertenece al usuario que cierra sesión: perfil, guardados, cola de salida, búsquedas
+     * recientes, informes de partner y la marca de última sincronización. Los datos públicos (restaurantes,
+     * catálogo, reseñas, ocupación) se conservan para que la siguiente sesión también funcione sin conexión.
+     */
     suspend fun clearUserData() {
         database.withTransaction {
             dao.clearProfile()
             dao.clearSaved()
             dao.clearOutbox()
+            dao.clearRecentSearches()
+            dao.deleteDocumentsWithPrefix(CacheKeys.PARTNER_REPORT_PREFIX)
+            dao.deleteDocument(LAST_SYNC_KEY)
+            dao.deleteDocument(DATA_OWNER_KEY)
         }
     }
+
+    /** Solo el cache de lectura (documentos); no toca datos del usuario ni la cola de salida. */
+    suspend fun clearCachedDocuments() {
+        dao.deleteDocumentsExcept(listOf(DATA_OWNER_KEY, LAST_SYNC_KEY))
+    }
+
+    suspend fun documentCount(): Int = dao.documentCount()
+
+    suspend fun documentBytes(): Long = dao.documentBytes()
+
+    suspend fun pendingCountExcludingAnalytics(): Int = dao.outboxCountExcluding(OutboxKind.ANALYTICS)
 
     override suspend fun enqueue(request: OutboxRequest) {
         database.withTransaction {
@@ -89,7 +111,8 @@ class LocalStore(
                     method = request.method,
                     path = request.path,
                     body = OutboxCodec.encode(request.body),
-                    createdAt = clock()
+                    createdAt = clock(),
+                    requestId = request.requestId
                 )
             )
             dao.trimOutbox(MAX_OUTBOX_ENTRIES)
@@ -97,19 +120,30 @@ class LocalStore(
     }
 
     override suspend fun pending(): List<OutboxEntry> = dao.outbox().map {
-        OutboxEntry(it.id, OutboxRequest(it.kind, it.method, it.path, OutboxCodec.decode(it.body)), it.attempts)
+        val requestId = it.requestId.ifBlank { "legacy-${it.id}" }
+        OutboxEntry(
+            it.id,
+            OutboxRequest(it.kind, it.method, it.path, OutboxCodec.decode(it.body), requestId),
+            it.attempts,
+            it.nextAttemptAt
+        )
     }
 
     override suspend fun remove(id: Long) = dao.deleteOutbox(id)
 
     override suspend fun recordAttempt(id: Long) = dao.bumpOutboxAttempts(id)
 
+    override suspend fun scheduleRetry(id: Long, notBefore: Long) = dao.setOutboxRetryAt(id, notBefore)
+
     override suspend fun count(): Int = dao.outboxCount()
 
     override suspend fun clear() = dao.clearOutbox()
 
-    private companion object {
+    companion object {
         const val MAX_OUTBOX_ENTRIES = 1000
+        /** Documento que guarda el id del usuario dueño de los datos locales (evita mezclar cuentas). */
+        const val DATA_OWNER_KEY = "data_owner"
+        const val LAST_SYNC_KEY = "last_sync"
     }
 
     suspend fun loadDocument(key: String): CacheDocumentEntity? = dao.document(key)

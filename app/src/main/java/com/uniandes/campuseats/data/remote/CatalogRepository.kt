@@ -6,6 +6,7 @@ import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.data.cache.CachePolicy
 import com.uniandes.campuseats.data.cache.CacheTtl
 import com.uniandes.campuseats.data.cache.DocumentCache
+import com.uniandes.campuseats.data.cache.MemoryCache
 import com.uniandes.campuseats.net.RemoteApi
 import com.uniandes.campuseats.net.attemptOrNull
 import org.json.JSONArray
@@ -46,16 +47,19 @@ fun parseCatalog(json: JSONObject): Catalog {
 class CatalogRepository(
     private val api: RemoteApi,
     private val cache: DocumentCache,
-    private val policy: CachePolicy = CachePolicy()
+    private val policy: CachePolicy = CachePolicy(),
+    private val memory: MemoryCache<String, Any>? = null
 ) {
 
     suspend fun cached(): Catalog {
+        (memory?.get(CacheKeys.CATALOG) as? Catalog)?.let { return it }
         val raw = attemptOrNull { cache.load(CacheKeys.CATALOG) } ?: return Catalog.Empty
         val parsed = attemptOrNull { parseCatalog(JSONObject(raw)) }
         if (parsed == null) {
             attemptOrNull { cache.clear(CacheKeys.CATALOG) }
             return Catalog.Empty
         }
+        memory?.put(CacheKeys.CATALOG, parsed)
         return parsed
     }
 
@@ -67,7 +71,10 @@ class CatalogRepository(
     suspend fun fetch(): Catalog {
         val json = api.get("/catalog")
         val parsed = parseCatalog(json)
-        if (!parsed.isEmpty) cache.save(CacheKeys.CATALOG, json.toString(), policy.now())
+        if (!parsed.isEmpty) {
+            memory?.put(CacheKeys.CATALOG, parsed)
+            cache.save(CacheKeys.CATALOG, json.toString(), policy.now())
+        }
         return parsed
     }
 }

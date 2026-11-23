@@ -24,7 +24,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -32,7 +31,13 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -53,7 +58,9 @@ import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.ReviewRatings
 import com.uniandes.campuseats.data.emptyProfile
-import com.uniandes.campuseats.data.local.HomeFilterStore
+import com.uniandes.campuseats.data.local.LocalStore
+import com.uniandes.campuseats.data.prefs.HomeFilterState
+import com.uniandes.campuseats.data.remote.appLevelFromRemote
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.attemptOrNull
@@ -62,6 +69,7 @@ import com.uniandes.campuseats.sensor.rememberUserLocation
 import com.uniandes.campuseats.ui.ConnectionErrorView
 import com.uniandes.campuseats.ui.CrowdingModal
 import com.uniandes.campuseats.ui.DetailView
+import com.uniandes.campuseats.ui.HomeFilters
 import com.uniandes.campuseats.ui.HomeView
 import com.uniandes.campuseats.ui.LoadingView
 import com.uniandes.campuseats.ui.LocalCatalog
@@ -75,13 +83,12 @@ import com.uniandes.campuseats.ui.ProfileView
 import com.uniandes.campuseats.ui.ReviewsListView
 import com.uniandes.campuseats.ui.SavedView
 import com.uniandes.campuseats.ui.SearchView
+import com.uniandes.campuseats.ui.SettingsView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
 import com.uniandes.campuseats.ui.PartnerReportView
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,8 +102,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport }
-private const val MAX_RECENT_SEARCHES = 5
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings }
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
@@ -105,8 +111,24 @@ private const val PROFILE_TAB = 4
 fun CampusEatsMainScreen() {
     val context = LocalContext.current
     val services = remember { AppServices.get(context) }
-    val auth: AuthViewModel = viewModel(factory = AuthViewModel.factory(services.authRepository, services.localStore, services.connectivity,  ))
+    val auth: AuthViewModel = viewModel(
+        factory = AuthViewModel.factory(
+            services.authRepository,
+            services.localStore,
+            services.connectivity,
+            services::purgeUserData
+        )
+    )
     val user = auth.user
+
+    // El worker de segundo plano (o un flush) recibio 401: se pide iniciar sesion de nuevo conservando la cola
+    val sessionExpired by services.sessionExpired.collectAsStateWithLifecycle()
+    LaunchedEffect(sessionExpired) {
+        if (sessionExpired) {
+            auth.onSessionExpired()
+            services.acknowledgeSessionExpired()
+        }
+    }
 
     when {
         auth.restoring -> LoadingView()
@@ -132,25 +154,35 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val localStore = services.localStore
-    var savedHome by remember { mutableStateOf(services.homeFilterStore.load()) }
+    var savedHome by remember { mutableStateOf(HomeFilterState()) }
+    val prefs by services.preferences.current.collectAsStateWithLifecycle()
     val analytics: AnalyticsViewModel = viewModel(factory = AnalyticsViewModel.factory(services))
     val sections: SectionAnalyticsViewModel = viewModel(factory = SectionAnalyticsViewModel.factory(services))
 
     var profileResolved by remember { mutableStateOf(false) }
     var surveyDone by remember { mutableStateOf(false) }
     var profile by remember { mutableStateOf(emptyProfile) }
-    var currentTab by remember { mutableIntStateOf(0) }
+    var currentTab by rememberSaveable { mutableIntStateOf(0) }
 
-    val overlayStack = remember { mutableStateListOf<Overlay>() }
+    // Pila de pantallas y restaurante elegido sobreviven a rotacion / muerte de proceso
+    val overlayStack = rememberSaveable(
+        saver = listSaver<SnapshotStateList<Overlay>, String>(
+            save = { stack -> stack.map { it.name } },
+            restore = { names -> names.mapNotNull { runCatching { Overlay.valueOf(it) }.getOrNull() }.toMutableStateList() }
+        )
+    ) { mutableStateListOf<Overlay>() }
     val overlay = overlayStack.lastOrNull()
-    var selectedRestaurant by remember { mutableStateOf<Restaurant?>(null) }
+    var selectedRestaurantId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingRestaurant by remember { mutableStateOf<Restaurant?>(null) }
 
     val reviews = remember { mutableStateListOf<Review>() }
     val crowding = remember { mutableStateMapOf<String, List<Int>>() }
     var savedIds by remember { mutableStateOf(emptySet<String>()) }
     var restaurants by remember { mutableStateOf(emptyList<Restaurant>()) }
+    val selectedRestaurant = selectedRestaurantId?.let { id -> restaurants.firstOrNull { it.id == id } }
     var restaurantsResolved by remember { mutableStateOf(false) }
+    var restaurantsReachable by remember { mutableStateOf(false) }
+    var catalogReachable by remember { mutableStateOf(false) }
     var recentSearches by remember { mutableStateOf(emptyList<String>()) }
     var catalog by remember { mutableStateOf(Catalog.Empty) }
     var catalogResolved by remember { mutableStateOf(false) }
@@ -159,12 +191,43 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var loadFailed by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var outboxPending by remember { mutableIntStateOf(0) }
-    val connectivityManager = remember { context.getSystemService(ConnectivityManager::class.java) }
-    var online by remember { mutableStateOf(services.connectivity.online.value) }
+    // Fuente unica de verdad de conectividad (red con internet validado)
+    val online by services.connectivity.online.collectAsStateWithLifecycle()
     var lastSyncTime by remember { mutableStateOf<Long?>(null) }
 
+    // Cambios hechos offline que aun no llegaron al servidor: se re-aplican encima de lo que baje de la red
+    suspend fun pendingCrowding(): Map<String, List<Int>> =
+        (attemptOrNull { localStore.pending() }.orEmpty())
+            .filter { it.request.kind == OutboxKind.OCCUPANCY }
+            .mapNotNull { entry ->
+                val body = entry.request.body ?: return@mapNotNull null
+                val id = body["restaurant_id"]?.toString() ?: return@mapNotNull null
+                val level = (body["level"] as? Number)?.toInt() ?: return@mapNotNull null
+                id to appLevelFromRemote(level)
+            }
+            .groupBy({ it.first }, { it.second })
+
+    suspend fun applyPendingSaved(base: Set<String>): Set<String> {
+        var result = base
+        (attemptOrNull { localStore.pending() }.orEmpty())
+            .filter { it.request.kind == OutboxKind.SAVED }
+            .forEach { entry ->
+                val id = entry.request.path.substringAfterLast('/')
+                result = if (entry.request.method == "DELETE") result - id else result + id
+            }
+        return result
+    }
+
+    suspend fun updatePending() {
+        val queued = attemptOrNull { localStore.pendingCountExcludingAnalytics() } ?: 0
+        val profilePending = if (attemptOrNull { services.profileSynchronizer.hasPending() } == true) 1 else 0
+        outboxPending = queued + profilePending
+    }
+
     suspend fun refreshRestaurants(force: Boolean = false) {
-        val fetched = attemptOrNull { services.restaurantRepository.revalidate(force) }?.takeIf { it.isNotEmpty() }
+        val result = attemptOrNull { services.restaurantRepository.revalidate(force) }
+        if (result != null) restaurantsReachable = true
+        val fetched = result?.takeIf { it.isNotEmpty() }
         val freshSummaries = attemptOrNull { services.reviewRepository.revalidateSummaries(force) }
         val base = fetched ?: restaurants.takeIf { freshSummaries != null && it.isNotEmpty() } ?: return
         val summaries = freshSummaries ?: services.reviewRepository.cachedSummaries()
@@ -172,7 +235,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     }
 
     suspend fun refreshCatalog(force: Boolean = false) {
-        attemptOrNull { services.catalogRepository.revalidate(force) }?.takeIf { !it.isEmpty }?.let { catalog = it }
+        val result = attemptOrNull { services.catalogRepository.revalidate(force) }
+        if (result != null) catalogReachable = true
+        result?.takeIf { !it.isEmpty }?.let { catalog = it }
     }
 
     suspend fun refreshReviews(force: Boolean = false) {
@@ -183,26 +248,38 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         val merged = ids.flatMap { id -> fetched[id] ?: current.filter { it.restaurantId == id } }
         reviews.clear()
         reviews.addAll(merged)
-        localStore.saveReviews(merged)
+        attemptOrNull { localStore.saveReviews(merged) }
     }
 
     suspend fun refreshCrowding(force: Boolean = false) {
         val fetched = attemptOrNull { services.occupancyRepository.revalidate(force) } ?: return
+        // No pisamos un reporte propio que sigue en cola offline
+        val merged = (fetched.keys + pendingCrowding().keys).associateWith { id ->
+            fetched[id].orEmpty() + pendingCrowding()[id].orEmpty()
+        }
         crowding.clear()
-        crowding.putAll(fetched)
-        localStore.saveCrowding(fetched)
+        crowding.putAll(merged)
+        attemptOrNull { localStore.saveCrowding(merged) }
     }
 
-    suspend fun flushOutbox() {
-        val result = attemptOrNull { services.outboxFlusher.flush() } ?: return
-        outboxPending = result.remaining
+    suspend fun flushOutbox(ignoreBackoff: Boolean = false) {
+        // El perfil editado offline tambien se reintenta al reconectar (antes solo al abrir la app)
+        attemptOrNull { services.profileSynchronizer.syncPending() }
+        val result = attemptOrNull { services.outboxFlusher.flush(ignoreBackoff) }
+        updatePending()
+        if (result == null) return
+        if (result.authExpired) {
+            services.markSessionExpired()
+            return
+        }
         if (result.dropped > 0) {
             Toast.makeText(context, "Some changes made offline could not be saved", Toast.LENGTH_SHORT).show()
         }
-        if ((OutboxKind.SAVED in result.sentKinds && result.remaining == 0) || result.dropped > 0) {
+        if (OutboxKind.SAVED in result.sentKinds || result.dropped > 0) {
             attemptOrNull { services.savedRepository.fetch() }?.let {
-                savedIds = it
-                localStore.saveSavedIds(it)
+                val merged = applyPendingSaved(it)
+                savedIds = merged
+                attemptOrNull { localStore.saveSavedIds(merged) }
             }
         }
         if (OutboxKind.OCCUPANCY in result.sentKinds) refreshCrowding(force = true)
@@ -210,19 +287,22 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             refreshReviews(force = true)
             refreshRestaurants(force = true)
         }
+        // Si algo quedo en cola, WorkManager lo termina en segundo plano con backoff aunque cierren la app
+        if (result.remaining > 0) services.syncScheduler.scheduleOutboxSync()
     }
 
     suspend fun enqueueAndFlush(request: OutboxRequest) {
         services.outboxStore.enqueue(request)
-        outboxPending = services.outboxStore.count()
-        if (services.connectivity.online.value) flushOutbox()
+        updatePending()
+        if (services.connectivity.online.value) flushOutbox() else services.syncScheduler.scheduleOutboxSync()
     }
 
     suspend fun refreshStale(force: Boolean = false) {
-        flushOutbox()
+        // La guarda va ANTES del flush: antes un flush podia lanzar refreshes en paralelo a otro refresh en curso
         if (refreshing) return
         refreshing = true
         try {
+            flushOutbox()
             coroutineScope {
                 launch { refreshRestaurants(force) }
                 launch { refreshCatalog(force) }
@@ -235,7 +315,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             // Se guarda la hora si hay internet y se trajeron los datos
             if (services.connectivity.online.value) {
                 val now = System.currentTimeMillis()
-                services.localStore.saveDocument("last_sync", "ok", now)
+                attemptOrNull { services.localStore.saveDocument(LocalStore.LAST_SYNC_KEY, "ok", now) }
                 lastSyncTime = now
             }
 
@@ -246,22 +326,15 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     val windowInfo = LocalWindowInfo.current
     LaunchedEffect(windowInfo.isWindowFocused) {
-        if (windowInfo.isWindowFocused) {
-            val network = connectivityManager.activeNetwork
-            val caps = connectivityManager.getNetworkCapabilities(network)
-            // Comprobar que si hay internet
-            val isReallyOnline = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-
-            online = isReallyOnline
-
-            if (startupDone && isReallyOnline) scope.launch { refreshStale() }
+        if (windowInfo.isWindowFocused && startupDone && services.connectivity.online.value) {
+            scope.launch { refreshStale() }
         }
     }
 
     fun recordRecentSearch(name: String) {
-        recentSearches = (listOf(name) + recentSearches.filter { it != name }).take(MAX_RECENT_SEARCHES)
+        recentSearches = (listOf(name) + recentSearches.filter { it != name }).take(prefs.maxRecentSearches)
         val snapshot = recentSearches
-        scope.launch { localStore.saveRecentSearches(snapshot) }
+        scope.launch { attemptOrNull { localStore.saveRecentSearches(snapshot) } }
     }
 
     suspend fun loadRemote() {
@@ -283,15 +356,15 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             }
             launch {
                 if (services.connectivity.online.value) flushOutbox()
-                if (outboxPending == 0) {
-                    attemptOrNull { services.savedRepository.fetch() }?.let {
-                        savedIds = it
-                        localStore.saveSavedIds(it)
-                    }
+                attemptOrNull { services.savedRepository.fetch() }?.let {
+                    val merged = applyPendingSaved(it)
+                    savedIds = merged
+                    attemptOrNull { localStore.saveSavedIds(merged) }
                 }
             }
         }
-        loadFailed = restaurants.isEmpty() || catalog.isEmpty
+        // Una lista vacia que SI llego del servidor no es un fallo; solo lo es no tener datos ni haber podido pedirlos
+        loadFailed = (restaurants.isEmpty() && !restaurantsReachable) || (catalog.isEmpty && !catalogReachable)
         if (loadFailed) return
         coroutineScope {
             launch { refreshReviews() }
@@ -304,9 +377,22 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (online && startupDone) refreshStale()
     }
 
+    // La pantalla de error de primer arranque se recupera sola al volver la conexion
+    LaunchedEffect(online, loadFailed) {
+        if (online && loadFailed) {
+            loadFailed = false
+            restaurantsResolved = false
+            catalogResolved = false
+            loadRemote()
+        }
+    }
+
     LaunchedEffect(user.id) {
         services.prepareLocalData()
-        outboxPending = services.outboxStore.count()
+        // Si quedaron datos locales de otra cuenta se purgan antes de mostrarlos o enviarlos con este token
+        services.ensureDataOwner(user.id)
+        savedHome = if (services.preferences.current.value.rememberHomeFilters) services.preferences.loadHomeFilters() else HomeFilterState()
+        updatePending()
         localStore.loadProfileRecord()?.let {
             profile = it.profile
             surveyDone = true
@@ -323,12 +409,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         profileResolved = surveyDone
         restaurantsResolved = restaurants.isNotEmpty()
         catalogResolved = !catalog.isEmpty
-        lastSyncTime = services.localStore.loadDocument("last_sync")?.fetchedAt
+        lastSyncTime = services.localStore.loadDocument(LocalStore.LAST_SYNC_KEY)?.fetchedAt
         loadRemote()
-    }
-
-    LaunchedEffect(Unit) {
-        services.connectivity.online.collect { online = it }
     }
 
     // Sensor GPS: se pide el permiso al terminar el onboarding y se comparte con las pantallas
@@ -367,7 +449,11 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             val completed = answers.copy(name = answers.name.ifBlank { user.name })
                             profile = completed
                             surveyDone = true
-                            scope.launch { services.profileSynchronizer.update(completed) }
+                            scope.launch {
+                                services.profileSynchronizer.update(completed)
+                                updatePending()
+                                if (outboxPending > 0) services.syncScheduler.scheduleOutboxSync()
+                            }
                         }
                     )
                 }
@@ -383,7 +469,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     fun commitDetail(r: Restaurant) {
         analytics.onOccupancyChecked(r.id, crowding[r.id].orEmpty().isNotEmpty())
-        selectedRestaurant = r
+        selectedRestaurantId = r.id
         pendingRestaurant = null
         overlayStack.clear()
         overlayStack.add(Overlay.Detail)
@@ -394,7 +480,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         savedIds = if (wasSaved) savedIds - id else savedIds + id
         val snapshot = savedIds
         scope.launch {
-            localStore.saveSavedIds(snapshot)
+            attemptOrNull { localStore.saveSavedIds(snapshot) }
             sections.onInteraction(
                 AppSection.Favorites,
                 if (wasSaved) SectionAction.FavoriteRemoved else SectionAction.FavoriteAdded,
@@ -427,11 +513,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
     SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
 
-    BackHandler(enabled = pendingRestaurant != null || overlayStack.isNotEmpty()) {
+    BackHandler(enabled = pendingRestaurant != null || overlayStack.isNotEmpty() || currentTab != 0) {
         when {
             pendingRestaurant != null -> pendingRestaurant = null
             overlay == Overlay.Detail -> closeAll()
-            else -> popOverlay()
+            overlayStack.isNotEmpty() -> popOverlay()
+            else -> currentTab = 0 // Back desde otra pestana vuelve a Discover en vez de cerrar la app
         }
     }
 
@@ -444,9 +531,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var pendingReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
 
     LaunchedEffect(outboxPending, selectedRestaurant) {
-        val pendingEntries = services.localStore.pending().filter {
-            it.request.kind == OutboxKind.REVIEW &&
-                    it.request.path.contains(selectedRestaurant?.id ?: "")
+        val reviewPath = selectedRestaurant?.let { "/restaurants/${it.id}/reviews" }
+        val pendingEntries = if (reviewPath == null) emptyList() else attemptOrNull { services.localStore.pending() }.orEmpty().filter {
+            it.request.kind == OutboxKind.REVIEW && it.request.path == reviewPath
         }
 
         pendingReviews = pendingEntries.mapNotNull { entry ->
@@ -530,6 +617,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             overlayStack.add(Overlay.ReviewsList)
                         },
                         onPartnerReport = { overlayStack.add(Overlay.PartnerReport) },
+                        isOnline = online,
                         onGetDirections = { tags ->
                             sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
                             analytics.onGoDecision(restaurant.id)
@@ -552,7 +640,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                                 enqueueAndFlush(services.reviewRepository.submitRequest(review))
                             }
                         },
-                        onBack = ::popOverlay
+                        onBack = ::popOverlay,
+                        isOnline = online
                     )
 
                     overlay == Overlay.ReviewsList && restaurant != null -> ReviewsListView(
@@ -570,8 +659,36 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         loadReport = { id, days, force ->
                             services.partnerReportRepository.load(id, days, user.id, force)
                         },
-                        onBack = ::popOverlay
+                        onBack = ::popOverlay,
+                        isOnline = online
                     )
+
+                    overlay == Overlay.Settings -> {
+                        val objectStats by services.objectMemoryCache.stats.collectAsStateWithLifecycle()
+                        val documentStats by services.documentMemoryCache.stats.collectAsStateWithLifecycle()
+                        var diskRefresh by remember { mutableIntStateOf(0) }
+                        val disk by produceState(AppServices.DiskCacheReport(0, 0L), diskRefresh) {
+                            value = services.diskCacheReport()
+                        }
+                        SettingsView(
+                            preferences = prefs,
+                            onChange = { transform -> scope.launch { services.preferences.update(transform) } },
+                            objectCache = objectStats,
+                            documentCache = documentStats,
+                            diskCache = disk,
+                            pendingChanges = outboxPending,
+                            online = online,
+                            onSyncNow = { scope.launch { flushOutbox(ignoreBackoff = true) } },
+                            onClearCache = {
+                                scope.launch {
+                                    services.clearAllCaches()
+                                    diskRefresh++
+                                    Toast.makeText(context, "Cache cleared", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onBack = ::popOverlay
+                        )
+                    }
 
                     overlay == Overlay.Survey -> SurveyView(
                         initialName = profile.name,
@@ -579,7 +696,11 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             val updated = answers.copy(name = answers.name.ifBlank { user.name })
                             analytics.onProfileSaved(profile, updated)
                             profile = updated
-                            scope.launch { services.profileSynchronizer.update(updated) }
+                            scope.launch {
+                                services.profileSynchronizer.update(updated)
+                                updatePending()
+                                if (outboxPending > 0) services.syncScheduler.scheduleOutboxSync()
+                            }
                             popOverlay()
                         }
                     )
@@ -594,10 +715,16 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             reviews = reviews,
                             userLocation = userLocation.location,
                             initialCategory = savedHome.category,
-                            initialFilters = savedHome.filters,
+                            initialFilters = HomeFilters(
+                                openNow = savedHome.openNow,
+                                savedOnly = savedHome.savedOnly,
+                                prices = savedHome.prices,
+                                minRating = savedHome.minRating
+                            ),
                             onViewStateChanged = { category, filters ->
-                                services.homeFilterStore.save(category, filters)
-                                savedHome = HomeFilterStore.Saved(category, filters)
+                                val state = HomeFilterState(category, filters.openNow, filters.savedOnly, filters.prices, filters.minRating)
+                                savedHome = state
+                                if (prefs.rememberHomeFilters) scope.launch { services.preferences.saveHomeFilters(state) }
                             },
                             onFilterUsed = { analytics.onFilterUsed(it, AnalyticsScreen.Home) },
                             onFilterSheetOpened = { sections.onSectionShown(AppSection.Filters) },
@@ -635,7 +762,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             recentSearches = recentSearches,
                             onClearRecent = {
                                 recentSearches = emptyList()
-                                scope.launch { localStore.saveRecentSearches(emptyList()) }
+                                scope.launch { attemptOrNull { localStore.saveRecentSearches(emptyList()) } }
                             }
                         )
                         MAP_TAB -> MapView(
@@ -668,17 +795,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         PROFILE_TAB -> ProfileView(
                             profile = profile,
                             userEmail = user.email,
-                            showLogoutWarning = auth.showLogoutWarning.collectAsState().value,
+                            showLogoutWarning = auth.showLogoutWarning.collectAsStateWithLifecycle().value,
                             onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
+                            onOpenSettings = { overlayStack.add(Overlay.Settings) },
                             onLogoutAttempt = { auth.attemptLogout() },
-                            onLogoutConfirm = {
-                                scope.launch {
-                                    if (services.connectivity.online.value) attemptOrNull { services.outboxFlusher.flush() }
-                                    services.localStore.clearUserData()
-                                    services.homeFilterStore.clear()
-                                    auth.confirmLogout()
-                                }
-                            },
+                            // Un solo camino de logout: el ViewModel envia lo pendiente y purga TODO (ver AppServices.purgeUserData)
+                            onLogoutConfirm = { auth.confirmLogout() },
                             onLogoutCancel = { auth.cancelLogout() },
                             onBack = { selectTab(0) }
                         )
@@ -693,7 +815,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             onSubmit = { level ->
                                 scope.launch {
                                     crowding[pending.id] = crowding[pending.id].orEmpty() + level
-                                    localStore.saveCrowding(crowding.toMap())
+                                    attemptOrNull { localStore.saveCrowding(crowding.toMap()) }
                                     enqueueAndFlush(services.occupancyRepository.reportRequest(pending.id, level))
                                 }
                                 commitDetail(pending)

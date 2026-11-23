@@ -48,8 +48,15 @@ class AuthRepository(
         } catch (e: Exception) {
             throw AuthException("Could not connect to the server. Check that the backend is running and your connection.")
         }
-        val user = AuthUser.fromJson(response.getJSONObject("user"))
-        storage.token = response.getString("access_token")
+        val user: AuthUser
+        val token: String
+        try {
+            user = AuthUser.fromJson(response.getJSONObject("user"))
+            token = response.getString("access_token")
+        } catch (e: org.json.JSONException) {
+            throw AuthException("The server sent an unexpected response. Try again in a moment.")
+        }
+        storage.token = token
         storage.user = user
         return user
     }

@@ -1,6 +1,9 @@
 package com.uniandes.campuseats.net
 
 import java.net.HttpURLConnection
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 import java.net.URL
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +19,11 @@ class ApiException(val statusCode: Int, val body: String) : Exception("HTTP $sta
             else -> null
         }
     }.getOrNull()
+}
+
+/** Elemento de contexto: si esta presente, la peticion lleva el encabezado Idempotency-Key. */
+class IdempotencyKey(val value: String) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<IdempotencyKey>
 }
 
 interface RemoteApi {
@@ -41,11 +49,13 @@ class HttpRemoteApi(
 
     private suspend fun request(method: String, path: String, body: Map<String, Any>?): JSONObject =
         withContext(Dispatchers.IO) {
+            val idempotencyKey = coroutineContext[IdempotencyKey]?.value
             val connection = URL(baseUrl + path).openConnection() as HttpURLConnection
             try {
                 connection.requestMethod = method
                 connection.connectTimeout = timeoutMs
                 connection.readTimeout = timeoutMs
+                idempotencyKey?.let { connection.setRequestProperty("Idempotency-Key", it) }
                 tokenProvider()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
                 if (body != null) {
                     connection.doOutput = true

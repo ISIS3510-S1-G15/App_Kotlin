@@ -1,5 +1,6 @@
 package com.uniandes.campuseats.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -57,7 +58,9 @@ data class OutboxEntity(
     val path: String,
     val body: String?,
     val createdAt: Long,
-    val attempts: Int = 0
+    val attempts: Int = 0,
+    @ColumnInfo(defaultValue = "''") val requestId: String = "",
+    @ColumnInfo(defaultValue = "0") val nextAttemptAt: Long = 0L
 )
 
 @Entity(tableName = "cache_documents")
