@@ -38,3 +38,16 @@ data class RankingInputs(
     val crowding: Map<String, List<Int>>,
     val weekCutoff: String
 )
+
+data class SnapshotRow(
+    val restaurantId: String,
+    val score: Double,
+    val reviewCount: Int
+)
+
+data class StoredRanking(
+    val rows: List<SnapshotRow>,
+    val computedAt: Long
+) {
+    val restaurantIds: List<String> get() = rows.map { it.restaurantId }
+}

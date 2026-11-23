@@ -8,9 +8,13 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.uniandes.campuseats.data.prefs.UserPreferences
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 
 /**
  * Programa trabajo en segundo plano con WorkManager, respetando las preferencias del usuario:
@@ -31,6 +35,22 @@ class SyncScheduler(
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
             .build()
         workManager()?.enqueueUniqueWork(OUTBOX_WORK, ExistingWorkPolicy.REPLACE, request)
+    }
+
+    fun scheduleRankingRefresh() {
+        val network = if (prefs().syncOnlyOnWifi) NetworkType.UNMETERED else NetworkType.CONNECTED
+        val request = OneTimeWorkRequestBuilder<RankingRefreshWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
+            .build()
+        workManager()?.enqueueUniqueWork(RANKING_WORK, ExistingWorkPolicy.KEEP, request)
+    }
+
+    fun rankingRefreshPending(): Flow<Boolean> {
+        val manager = workManager() ?: return flowOf(false)
+        return manager.getWorkInfosForUniqueWorkFlow(RANKING_WORK).map { infos ->
+            infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.BLOCKED }
+        }
     }
 
     fun applyPeriodicRefresh() {
@@ -57,12 +77,14 @@ class SyncScheduler(
         workManager()?.run {
             cancelUniqueWork(OUTBOX_WORK)
             cancelUniqueWork(REFRESH_WORK)
+            cancelUniqueWork(RANKING_WORK)
         }
     }
 
     private companion object {
         const val OUTBOX_WORK = "outbox-sync"
         const val REFRESH_WORK = "cache-refresh"
+        const val RANKING_WORK = "ranking-refresh"
         const val BACKOFF_SECONDS = 30L
         const val REFRESH_HOURS = 3L
     }

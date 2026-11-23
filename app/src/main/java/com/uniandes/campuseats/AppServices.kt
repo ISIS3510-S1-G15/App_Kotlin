@@ -21,6 +21,7 @@ import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.data.outbox.OutboxStore
 import com.uniandes.campuseats.data.prefs.UserPreferencesRepository
+import com.uniandes.campuseats.data.ranking.RankingCache
 import com.uniandes.campuseats.data.ranking.RankingRepository
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.OccupancyRepository
@@ -85,7 +86,8 @@ class AppServices private constructor(val appContext: Context) {
     val catalogRepository = CatalogRepository(api, documentCache, cachePolicy, objectMemoryCache)
     val occupancyRepository = OccupancyRepository(api, documentCache, cachePolicy)
     val partnerReportRepository = PartnerReportRepository(api, documentCache, cachePolicy)
-    val rankingRepository = RankingRepository(restaurantRepository, reviewRepository, occupancyRepository, localStore)
+    val rankingCache = RankingCache()
+    val rankingRepository = RankingRepository(restaurantRepository, reviewRepository, occupancyRepository, localStore, rankingCache, cachePolicy)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)
     val syncScheduler = SyncScheduler(appContext) { preferences.current.value }
 
@@ -185,11 +187,13 @@ class AppServices private constructor(val appContext: Context) {
     fun clearMemoryCaches() {
         objectMemoryCache.clear()
         documentMemoryCache.clear()
+        rankingCache.clear()
     }
 
     private fun trimMemoryCaches(fraction: Float) {
         objectMemoryCache.trimTo(fraction)
         documentMemoryCache.trimTo(fraction)
+        rankingCache.trim(fraction)
     }
 
     /** Borra cache en memoria + documentos cacheados en disco (no toca datos del usuario ni la cola de salida). */

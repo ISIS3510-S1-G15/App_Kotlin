@@ -16,6 +16,7 @@ object CacheTtl {
     const val REVIEW_SUMMARIES = 10 * 60 * 1000L
     const val OCCUPANCY = 2 * 60 * 1000L
     const val PARTNER_REPORT = 15 * 60 * 1000L
+    const val RANKING = 30 * 60 * 1000L
 }
 
 object CacheKeys {

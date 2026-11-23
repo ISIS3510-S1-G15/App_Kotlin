@@ -100,4 +100,25 @@ interface AppDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDocument(document: CacheDocumentEntity)
+
+    @Query(
+        "SELECT * FROM ranking_snapshots WHERE criterionName = :criterion AND windowName = :window " +
+            "AND generation = :generation ORDER BY position"
+    )
+    suspend fun rankingSnapshot(criterion: String, window: String, generation: Int): List<RankingSnapshotEntity>
+
+    @Query("DELETE FROM ranking_snapshots WHERE criterionName = :criterion AND windowName = :window AND generation = :generation")
+    suspend fun deleteRankingGeneration(criterion: String, window: String, generation: Int)
+
+    @Query(
+        "UPDATE ranking_snapshots SET generation = :to WHERE criterionName = :criterion AND windowName = :window " +
+            "AND generation = :from"
+    )
+    suspend fun moveRankingGeneration(criterion: String, window: String, from: Int, to: Int)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRankingSnapshot(items: List<RankingSnapshotEntity>)
+
+    @Query("DELETE FROM ranking_snapshots")
+    suspend fun clearRankingSnapshots()
 }

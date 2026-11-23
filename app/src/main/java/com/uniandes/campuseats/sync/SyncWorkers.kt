@@ -58,3 +58,18 @@ class CacheRefreshWorker(context: Context, params: WorkerParameters) : Coroutine
         return Result.success()
     }
 }
+
+class RankingRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+
+    override suspend fun doWork(): Result {
+        val services = AppServices.get(applicationContext)
+        if (services.sessionStore.token == null) return Result.success()
+
+        val refreshed = attemptOrNull { services.rankingRepository.refreshInBackground() } ?: false
+        return if (!refreshed && runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.success()
+    }
+
+    private companion object {
+        const val MAX_ATTEMPTS = 5
+    }
+}
