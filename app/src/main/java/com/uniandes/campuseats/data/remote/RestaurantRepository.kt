@@ -8,6 +8,7 @@ import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.data.cache.CachePolicy
 import com.uniandes.campuseats.data.cache.CacheTtl
 import com.uniandes.campuseats.data.cache.DocumentCache
+import com.uniandes.campuseats.data.cache.MemoryCache
 import com.uniandes.campuseats.net.RemoteApi
 import com.uniandes.campuseats.net.attemptOrNull
 import org.json.JSONObject
@@ -66,16 +67,20 @@ class RestaurantRepository(
     private val api: RemoteApi,
     private val cache: DocumentCache,
     private val imageFor: (String) -> Int? = ::bundledImageFor,
-    private val policy: CachePolicy = CachePolicy()
+    private val policy: CachePolicy = CachePolicy(),
+    private val memory: MemoryCache<String, Any>? = null
 ) {
 
+    @Suppress("UNCHECKED_CAST")
     suspend fun cached(): List<Restaurant> {
+        (memory?.get(CacheKeys.RESTAURANTS) as? List<Restaurant>)?.let { return it }
         val raw = attemptOrNull { cache.load(CacheKeys.RESTAURANTS) } ?: return emptyList()
         val parsed = attemptOrNull { parseRestaurants(JSONObject(raw), imageFor) }
         if (parsed == null) {
             attemptOrNull { cache.clear(CacheKeys.RESTAURANTS) }
             return emptyList()
         }
+        memory?.put(CacheKeys.RESTAURANTS, parsed)
         return parsed
     }
 
@@ -87,7 +92,10 @@ class RestaurantRepository(
     suspend fun fetch(): List<Restaurant> {
         val json = api.get("/restaurants")
         val parsed = parseRestaurants(json, imageFor)
-        if (parsed.isNotEmpty()) cache.save(CacheKeys.RESTAURANTS, json.toString(), policy.now())
+        if (parsed.isNotEmpty()) {
+            memory?.put(CacheKeys.RESTAURANTS, parsed)
+            cache.save(CacheKeys.RESTAURANTS, json.toString(), policy.now())
+        }
         return parsed
     }
 }

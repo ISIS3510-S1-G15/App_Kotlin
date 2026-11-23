@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +48,6 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView as OsmMapView
 import org.osmdroid.views.overlay.Marker
-import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.locationLabel
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.currentMinutesOfDay
@@ -244,8 +244,12 @@ fun MapView(
                 .clip(mapShape)
                 .border(1.dp, CardBorder, mapShape)
         ) {
+            val pinContext = LocalContext.current
+            // Los bitmaps de los pines se crean una vez (antes se recreaban en cada recomposicion / cambio de GPS)
+            val pinIcons = remember { createPinIcons(pinContext) }
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
+                onRelease = { it.onDetach() },
                 factory = { context ->
                     OfflineMap.configure(context)
 
@@ -260,29 +264,7 @@ fun MapView(
                     if (isOnline) OfflineMap.prefetchCampus(mapView)
                     mapView.overlays.clear()
 
-                    // 1. Dibujamos los pines
-                    val size = 50 // Tamaño en pixeles
-                    val openBitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
-                    val closedBitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
-
-                    val openCanvas = android.graphics.Canvas(openBitmap)
-                    val closedCanvas = android.graphics.Canvas(closedBitmap)
-                    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-
-                    // Pin Abierto
-                    paint.color = android.graphics.Color.WHITE
-                    openCanvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-                    paint.color = Green.toArgb() // Usamos el verde de tu paleta
-                    openCanvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 6f, paint)
-
-                    // Pin Cerrado
-                    paint.color = android.graphics.Color.WHITE
-                    closedCanvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-                    paint.color = android.graphics.Color.parseColor("#D32F2F") // Un rojo profesional
-                    closedCanvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 6f, paint)
-
-                    val openIcon = android.graphics.drawable.BitmapDrawable(mapView.context.resources, openBitmap)
-                    val closedIcon = android.graphics.drawable.BitmapDrawable(mapView.context.resources, closedBitmap)
+                    val (openIcon, closedIcon) = pinIcons
 
                     // 2. Asignamos los íconos a los restaurantes
                     visible.forEach { r ->
@@ -366,7 +348,7 @@ fun MapView(
                         .padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    AsyncImage(
+                    RestaurantImage(
                         model = sel.image,
                         contentDescription = sel.name,
                         contentScale = ContentScale.Crop,
@@ -552,4 +534,19 @@ private fun categoryEmoji(cat: String): String {
         "Smoothies" to "🥤"
     )
     return map[cat] ?: "🍴"
+}
+/** Pines circulares (abierto = verde, cerrado = rojo) reutilizados por todos los marcadores del mapa. */
+private fun createPinIcons(context: android.content.Context): Pair<android.graphics.drawable.BitmapDrawable, android.graphics.drawable.BitmapDrawable> {
+    val size = 50
+    fun pin(innerColor: Int): android.graphics.drawable.BitmapDrawable {
+        val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.color = android.graphics.Color.WHITE
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        paint.color = innerColor
+        canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 6f, paint)
+        return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
+    }
+    return pin(Green.toArgb()) to pin(android.graphics.Color.parseColor("#D32F2F"))
 }

@@ -57,7 +57,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.text.format.DateUtils
-import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Profile
 import com.uniandes.campuseats.data.greetingFor
 import com.uniandes.campuseats.data.Recommendation
@@ -469,7 +468,7 @@ private fun FeaturedRestaurant(
             .shadow(10.dp, RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
     ) {
-        AsyncImage(
+        RestaurantImage(
             model = restaurant.image,
             contentDescription = restaurant.name,
             modifier = Modifier.fillMaxSize(),
@@ -648,7 +647,7 @@ private fun RestaurantCard(
                 .weight(1f)
                 .fillMaxHeight()
         ) {
-            AsyncImage(
+            RestaurantImage(
                 model = restaurant.image,
                 contentDescription = restaurant.name,
                 modifier = Modifier.fillMaxSize(),

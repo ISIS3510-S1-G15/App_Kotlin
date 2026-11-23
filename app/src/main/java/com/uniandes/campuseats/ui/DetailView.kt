@@ -61,7 +61,6 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.avgCrowding
@@ -84,6 +83,9 @@ private val Green = Color(0xFF3A8C4F)
 private val BarOff = Color(0xFFD4CAC0)
 
 @OptIn(ExperimentalLayoutApi::class)
+private const val FRAMED_WITH_USER = "framed_with_user"
+private const val FRAMED_RESTAURANT_ONLY = "framed_restaurant_only"
+
 @Composable
 fun DetailView(
     restaurant: Restaurant,
@@ -97,7 +99,8 @@ fun DetailView(
     onWriteReview: () -> Unit,
     onSeeReviews: () -> Unit,
     onPartnerReport: (() -> Unit)? = null,
-    onGetDirections: (tags: List<String>) -> Unit
+    onGetDirections: (tags: List<String>) -> Unit,
+    isOnline: Boolean = true
 ) {
     val r = restaurant
     val context = LocalContext.current
@@ -121,7 +124,7 @@ fun DetailView(
                 .fillMaxWidth()
                 .height(240.dp)
         ) {
-            AsyncImage(
+            RestaurantImage(
                 model = r.image,
                 contentDescription = r.name,
                 modifier = Modifier.fillMaxSize(),
@@ -271,7 +274,10 @@ fun DetailView(
                                 setMultiTouchControls(true)
                             }
                         },
+                        // Libera hilos de tiles y listeners cuando el mapa sale de la composicion
+                        onRelease = { it.onDetach() },
                         update = { mapView ->
+                            OfflineMap.applyConnectivity(mapView, isOnline)
                             mapView.overlays.clear()
 
                             val restPoint = GeoPoint(r.latitude, r.longitude)
@@ -312,7 +318,7 @@ fun DetailView(
 
                                 val userMarker = Marker(mapView)
                                 userMarker.position = userPoint
-                                userMarker.title = "Tú estás aquí"
+                                userMarker.title = "You are here"
                                 userMarker.icon = userIcon
                                 userMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                                 mapView.overlays.add(userMarker)
@@ -320,13 +326,19 @@ fun DetailView(
                                 // Calcular el area que abarca al usuario y al restaurante
                                 val boundingBox = BoundingBox.fromGeoPoints(listOf(userPoint, restPoint))
 
-                                // Usamos post{} para asegurarnos de que el mapa ya se dibujo en pantalla
-                                mapView.post {
-                                    // increaseByScale(1.4f) añade márgenes para que los pines no queden pegados a los bordes
-                                    mapView.zoomToBoundingBox(boundingBox.increaseByScale(1.4f), true)
+                                // Solo se encuadra la primera vez que hay ubicacion: antes se re-encuadraba en cada
+                                // actualizacion del GPS y peleaba con los gestos del usuario
+                                if (mapView.tag != FRAMED_WITH_USER) {
+                                    mapView.tag = FRAMED_WITH_USER
+                                    // post{} para asegurarnos de que el mapa ya se dibujo en pantalla
+                                    mapView.post {
+                                        // increaseByScale(1.4f) añade márgenes para que los pines no queden pegados a los bordes
+                                        mapView.zoomToBoundingBox(boundingBox.increaseByScale(1.4f), true)
+                                    }
                                 }
-                            } else {
+                            } else if (mapView.tag != FRAMED_RESTAURANT_ONLY) {
                                 // Si el GPS esta apagado o no hay permisos, solo centramos el restaurante
+                                mapView.tag = FRAMED_RESTAURANT_ONLY
                                 mapView.controller.setZoom(18.0)
                                 mapView.controller.setCenter(restPoint)
                             }
@@ -334,6 +346,9 @@ fun DetailView(
                             mapView.invalidate()
                         }
                     )
+                    if (!isOnline) {
+                        OfflineMapNotice(Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+                    }
                 }
             }
 

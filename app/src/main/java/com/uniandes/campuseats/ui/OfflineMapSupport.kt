@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.uniandes.campuseats.AppServices
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 import java.io.File
 import org.osmdroid.config.Configuration
@@ -53,6 +54,12 @@ object OfflineMap {
 
     fun prefetchCampus(mapView: MapView) {
         if (prefetched) return
+        // Con ahorro de datos o "solo Wi-Fi" no se descargan tiles por datos moviles
+        val services = AppServices.get(mapView.context)
+        val prefs = services.preferences.current.value
+        val metered = services.connectivity.metered.value
+        if (metered && (prefs.dataSaver || prefs.syncOnlyOnWifi)) return
+        // Un solo intento por proceso: antes se reintentaba (y fallaba) en cada recomposicion del mapa
         prefetched = true
         try {
             val area = BoundingBox(
@@ -61,7 +68,7 @@ object OfflineMap {
             )
             CacheManager(mapView).downloadAreaAsync(mapView.context, area, PREFETCH_MIN_ZOOM, PREFETCH_MAX_ZOOM)
         } catch (e: Exception) {
-            prefetched = false 
+            // osmdroid rechaza la descarga masiva para algunos proveedores de tiles; los tiles vistos igual se guardan
         }
     }
 }

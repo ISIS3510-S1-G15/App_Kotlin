@@ -7,6 +7,7 @@ import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.data.cache.CachePolicy
 import com.uniandes.campuseats.data.cache.CacheTtl
 import com.uniandes.campuseats.data.cache.DocumentCache
+import com.uniandes.campuseats.data.cache.MemoryCache
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.RemoteApi
@@ -59,17 +60,21 @@ fun reviewFromRemote(json: JSONObject) = Review(
 class ReviewRepository(
     private val api: RemoteApi,
     private val cache: DocumentCache,
-    private val policy: CachePolicy = CachePolicy()
+    private val policy: CachePolicy = CachePolicy(),
+    private val memory: MemoryCache<String, Any>? = null
 ) {
 
     suspend fun summaries(): Map<String, RatingSummary> {
         val json = api.get("/reviews/summary")
         val parsed = parseSummaries(json)
+        memory?.put(CacheKeys.REVIEW_SUMMARIES, parsed)
         cache.save(CacheKeys.REVIEW_SUMMARIES, json.toString(), policy.now())
         return parsed
     }
 
+    @Suppress("UNCHECKED_CAST")
     suspend fun cachedSummaries(): Map<String, RatingSummary> {
+        (memory?.get(CacheKeys.REVIEW_SUMMARIES) as? Map<String, RatingSummary>)?.let { return it }
         val raw = attemptOrNull { cache.load(CacheKeys.REVIEW_SUMMARIES) }?.takeIf { it.isNotBlank() }
             ?: return emptyMap()
         val parsed = attemptOrNull { parseSummaries(JSONObject(raw)) }
@@ -77,6 +82,7 @@ class ReviewRepository(
             attemptOrNull { cache.clear(CacheKeys.REVIEW_SUMMARIES) }
             return emptyMap()
         }
+        memory?.put(CacheKeys.REVIEW_SUMMARIES, parsed)
         return parsed
     }
 
@@ -111,6 +117,7 @@ class ReviewRepository(
     }
 
     suspend fun invalidate(restaurantId: String) {
+        memory?.invalidate(CacheKeys.REVIEW_SUMMARIES)
         attemptOrNull {
             cache.clear(CacheKeys.reviews(restaurantId))
             cache.clear(CacheKeys.REVIEW_SUMMARIES)

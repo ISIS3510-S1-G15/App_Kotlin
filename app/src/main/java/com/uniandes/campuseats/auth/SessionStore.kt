@@ -14,14 +14,23 @@ interface SessionStorage {
 
 class SessionStore(context: Context) : SessionStorage {
 
-    private val masterKey = MasterKey.Builder(context.applicationContext)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    private val encryptedPrefs = openEncryptedPrefs(context.applicationContext)
 
-    private val encryptedPrefs = EncryptedSharedPreferences.create(
-        context.applicationContext,
-        "campus_eats_session_secure",
-        masterKey,
+    /**
+     * Si el archivo cifrado no se puede abrir (clave del Keystore perdida tras un restore o cambio de dispositivo)
+     * se borra y se recrea: el usuario solo tiene que iniciar sesion otra vez en vez de ver un crash al arrancar.
+     */
+    private fun openEncryptedPrefs(app: Context) = try {
+        createEncryptedPrefs(app)
+    } catch (e: Exception) {
+        app.deleteSharedPreferences(FILE_NAME)
+        createEncryptedPrefs(app)
+    }
+
+    private fun createEncryptedPrefs(app: Context) = EncryptedSharedPreferences.create(
+        app,
+        FILE_NAME,
+        MasterKey.Builder(app).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
@@ -48,6 +57,7 @@ class SessionStore(context: Context) : SessionStorage {
     }
 
     private companion object {
+        const val FILE_NAME = "campus_eats_session_secure"
         const val KEY_TOKEN = "token"
         const val KEY_USER = "user"
     }
