@@ -21,6 +21,7 @@ import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.data.outbox.OutboxStore
 import com.uniandes.campuseats.data.prefs.UserPreferencesRepository
+import com.uniandes.campuseats.data.ranking.RankingRepository
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.OccupancyRepository
 import com.uniandes.campuseats.data.remote.PartnerReportRepository
@@ -84,6 +85,7 @@ class AppServices private constructor(val appContext: Context) {
     val catalogRepository = CatalogRepository(api, documentCache, cachePolicy, objectMemoryCache)
     val occupancyRepository = OccupancyRepository(api, documentCache, cachePolicy)
     val partnerReportRepository = PartnerReportRepository(api, documentCache, cachePolicy)
+    val rankingRepository = RankingRepository(restaurantRepository, reviewRepository, occupancyRepository, localStore)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)
     val syncScheduler = SyncScheduler(appContext) { preferences.current.value }
 

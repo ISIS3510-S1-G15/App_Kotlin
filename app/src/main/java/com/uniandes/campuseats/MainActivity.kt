@@ -87,6 +87,8 @@ import com.uniandes.campuseats.ui.SettingsView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
 import com.uniandes.campuseats.ui.PartnerReportView
+import com.uniandes.campuseats.ui.RankingView
+import com.uniandes.campuseats.ranking.RankingViewModel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -102,7 +104,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings }
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings, Ranking }
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
@@ -500,6 +502,16 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         overlayStack.clear()
     }
 
+    fun backFromDetail() {
+        if (overlayStack.getOrNull(overlayStack.lastIndex - 1) == Overlay.Ranking) popOverlay() else closeAll()
+    }
+
+    fun openDetailFromRanking(r: Restaurant) {
+        analytics.onOccupancyChecked(r.id, crowding[r.id].orEmpty().isNotEmpty())
+        selectedRestaurantId = r.id
+        overlayStack.add(Overlay.Detail)
+    }
+
     fun selectTab(tab: Int) {
         overlayStack.clear()
         pendingRestaurant = null
@@ -516,7 +528,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     BackHandler(enabled = pendingRestaurant != null || overlayStack.isNotEmpty() || currentTab != 0) {
         when {
             pendingRestaurant != null -> pendingRestaurant = null
-            overlay == Overlay.Detail -> closeAll()
+            overlay == Overlay.Detail -> backFromDetail()
             overlayStack.isNotEmpty() -> popOverlay()
             else -> currentTab = 0 // Back desde otra pestana vuelve a Discover en vez de cerrar la app
         }
@@ -607,7 +619,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         distanceMeters = userLocation.location?.let { distanceMeters(it, restaurant) },
                         userLocation = userLocation.location,
                         onToggleSave = { toggleSaved(restaurant.id) },
-                        onBack = ::closeAll,
+                        onBack = ::backFromDetail,
                         onWriteReview = {
                             sections.onInteraction(AppSection.Details, SectionAction.ReviewWriteOpened)
                             overlayStack.add(Overlay.WriteReview)
@@ -663,6 +675,19 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         isOnline = online
                     )
 
+                    overlay == Overlay.Ranking -> {
+                        val rankingViewModel: RankingViewModel = viewModel(factory = RankingViewModel.factory(services))
+                        val rankingState by rankingViewModel.state.collectAsStateWithLifecycle()
+                        RankingView(
+                            state = rankingState,
+                            onCriterion = rankingViewModel::selectCriterion,
+                            onWindow = rankingViewModel::selectWindow,
+                            onRefresh = rankingViewModel::refresh,
+                            onSelect = ::openDetailFromRanking,
+                            onBack = ::popOverlay
+                        )
+                    }
+
                     overlay == Overlay.Settings -> {
                         val objectStats by services.objectMemoryCache.stats.collectAsStateWithLifecycle()
                         val documentStats by services.documentMemoryCache.stats.collectAsStateWithLifecycle()
@@ -709,6 +734,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         0 -> HomeView(
                             onSelect = requestDetail,
                             onOpenProfile = { selectTab(PROFILE_TAB) },
+                            onOpenRanking = { overlayStack.add(Overlay.Ranking) },
                             profile = profile,
                             crowding = crowding,
                             savedIds = savedIds,
