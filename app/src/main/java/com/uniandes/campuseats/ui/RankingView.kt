@@ -108,11 +108,19 @@ fun RankingView(
             }
         }
 
-        state.lastUpdated?.let {
+        val updatedAt = state.lastUpdated?.let { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it)) }
+        val status = when {
+            state.refreshQueued -> "Refresh queued · it will update when you're back online"
+            !state.online -> "Offline · showing saved ranking" + (updatedAt?.let { " from $it" } ?: "")
+            updatedAt != null -> "Updated $updatedAt"
+            else -> null
+        }
+        status?.let {
             Text(
-                text = "Updated ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))}",
-                color = Muted,
+                text = it,
+                color = if (state.refreshQueued || !state.online) Orange else Muted,
                 fontSize = 12.sp,
+                fontWeight = if (state.refreshQueued || !state.online) FontWeight.SemiBold else FontWeight.Normal,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
             )
         }

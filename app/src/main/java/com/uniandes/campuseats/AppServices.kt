@@ -87,7 +87,7 @@ class AppServices private constructor(val appContext: Context) {
     val occupancyRepository = OccupancyRepository(api, documentCache, cachePolicy)
     val partnerReportRepository = PartnerReportRepository(api, documentCache, cachePolicy)
     val rankingCache = RankingCache()
-    val rankingRepository = RankingRepository(restaurantRepository, reviewRepository, occupancyRepository, localStore, rankingCache)
+    val rankingRepository = RankingRepository(restaurantRepository, reviewRepository, occupancyRepository, localStore, rankingCache, cachePolicy)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)
     val syncScheduler = SyncScheduler(appContext) { preferences.current.value }
 
