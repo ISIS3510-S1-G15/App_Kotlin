@@ -1,5 +1,6 @@
 package com.uniandes.campuseats.data.ranking
 
+import android.util.Log
 import com.uniandes.campuseats.data.local.LocalStore
 import com.uniandes.campuseats.data.remote.OccupancyRepository
 import com.uniandes.campuseats.data.remote.RestaurantRepository
@@ -9,6 +10,9 @@ import com.uniandes.campuseats.net.attemptOrNull
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 class RankingRepository(
     private val restaurants: RestaurantRepository,
@@ -19,16 +23,30 @@ class RankingRepository(
 ) {
 
     suspend fun load(criterion: RankingCriterion, window: RankingWindow, refresh: Boolean): RankingResult {
+        val startedAt = System.nanoTime()
         if (refresh) refreshSources()
+        val refreshedAt = System.nanoTime()
         val inputs = gatherInputs()
-        val items = RankingEngine.compute(inputs, criterion, window)
-        return RankingResult(criterion, window, items, clock(), fromSnapshot = false)
+        val gatheredAt = System.nanoTime()
+        val all = RankingEngine.computeAll(inputs, window)
+        val computedAt = System.nanoTime()
+        Log.d(
+            TAG,
+            "refresh=${millis(refreshedAt - startedAt)}ms inputs=${millis(gatheredAt - refreshedAt)}ms " +
+                "compute=${millis(computedAt - gatheredAt)}ms restaurants=${inputs.restaurants.size} reviews=${inputs.reviews.size}"
+        )
+        return RankingResult(criterion, window, all[criterion].orEmpty(), clock(), fromSnapshot = false)
     }
 
-    private suspend fun refreshSources() {
-        attemptOrNull { restaurants.revalidate(force = true) }
-        attemptOrNull { reviews.revalidateSummaries(force = true) }
-        val ids = restaurants.cached().map { it.id }
+    private suspend fun refreshSources() = coroutineScope {
+        val restaurantsJob = async(Dispatchers.IO) { attemptOrNull { restaurants.revalidate(force = true) } }
+        val summariesJob = async(Dispatchers.IO) { attemptOrNull { reviews.revalidateSummaries(force = true) } }
+        val occupancyJob = async(Dispatchers.IO) { attemptOrNull { occupancy.revalidate(force = true) } }
+        val fetchedRestaurants = restaurantsJob.await()
+        summariesJob.await()
+        occupancyJob.await()?.let { fetched -> attemptOrNull { localStore.saveCrowding(fetched) } }
+
+        val ids = (fetchedRestaurants ?: restaurants.cached()).map { it.id }
         if (ids.isNotEmpty()) {
             val fetched = attemptOrNull { reviews.revalidateAll(ids, force = true) }.orEmpty()
             if (fetched.isNotEmpty()) {
@@ -39,15 +57,15 @@ class RankingRepository(
         }
     }
 
-    private suspend fun gatherInputs(): RankingInputs {
-        val base = restaurants.cached()
-        val summaries = reviews.cachedSummaries()
-        val allReviews = attemptOrNull { localStore.loadReviews() }.orEmpty()
-        val crowding = attemptOrNull { occupancy.revalidate() } ?: attemptOrNull { localStore.loadCrowding() }.orEmpty()
-        return RankingInputs(
-            restaurants = applyRatingSummaries(base, summaries),
-            reviews = allReviews,
-            crowding = crowding,
+    private suspend fun gatherInputs(): RankingInputs = coroutineScope {
+        val base = async(Dispatchers.IO) { restaurants.cached() }
+        val summaries = async(Dispatchers.IO) { reviews.cachedSummaries() }
+        val allReviews = async(Dispatchers.IO) { attemptOrNull { localStore.loadReviews() }.orEmpty() }
+        val crowding = async(Dispatchers.IO) { attemptOrNull { localStore.loadCrowding() }.orEmpty() }
+        RankingInputs(
+            restaurants = applyRatingSummaries(base.await(), summaries.await()),
+            reviews = allReviews.await(),
+            crowding = crowding.await(),
             weekCutoff = weekCutoff()
         )
     }
@@ -60,7 +78,11 @@ class RankingRepository(
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
     }
 
+    private fun millis(nanos: Long) = nanos / NANOS_PER_MILLI
+
     private companion object {
+        const val TAG = "Ranking"
         const val WEEK_DAYS = 7
+        const val NANOS_PER_MILLI = 1_000_000L
     }
 }
