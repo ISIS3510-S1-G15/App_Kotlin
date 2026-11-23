@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
@@ -89,6 +91,7 @@ private val LightMuted = Color(0xFFB8AC9E)
 fun HomeView(
     onSelect: (Restaurant) -> Unit,
     onOpenProfile: () -> Unit,
+    onOpenRanking: () -> Unit = {},
     profile: Profile,
     crowding: Map<String, List<Int>>,
     savedIds: Set<String>,
@@ -225,6 +228,26 @@ fun HomeView(
                         )
                     }
 
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable(onClick = onOpenRanking),
+                        shape = CircleShape,
+                        color = Orange
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.EmojiEvents,
+                                contentDescription = "Top ranking",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
                     Surface(
                         modifier = Modifier
                             .size(40.dp)
@@ -253,6 +276,7 @@ fun HomeView(
                                 )
                             }
                         }
+                    }
                     }
                 }
             }

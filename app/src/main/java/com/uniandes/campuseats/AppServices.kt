@@ -12,6 +12,7 @@ import com.uniandes.campuseats.data.local.RoomDocumentCache
 import com.uniandes.campuseats.data.local.HomeFilterStore
 import com.uniandes.campuseats.data.outbox.OutboxFlusher
 import com.uniandes.campuseats.data.outbox.OutboxStore
+import com.uniandes.campuseats.data.ranking.RankingRepository
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.OccupancyRepository
 import com.uniandes.campuseats.data.remote.ProfileRepository
@@ -46,6 +47,7 @@ class AppServices private constructor(val appContext: Context) {
     val catalogRepository = CatalogRepository(api, documentCache)
     val occupancyRepository = OccupancyRepository(api, documentCache)
     val partnerReportRepository = PartnerReportRepository(api, documentCache)
+    val rankingRepository = RankingRepository(restaurantRepository, reviewRepository, occupancyRepository, localStore)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)
 
     suspend fun prepareLocalData() = migrationLock.withLock {
