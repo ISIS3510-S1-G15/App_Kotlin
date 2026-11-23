@@ -69,3 +69,18 @@ data class CacheDocumentEntity(
     val payload: String,
     val fetchedAt: Long
 )
+
+@Entity(
+    tableName = "ranking_snapshots",
+    primaryKeys = ["criterionName", "windowName", "generation", "position"]
+)
+data class RankingSnapshotEntity(
+    val criterionName: String,
+    val windowName: String,
+    val generation: Int,
+    val position: Int,
+    val restaurantId: String,
+    val score: Double,
+    val reviewCount: Int,
+    val computedAt: Long
+)

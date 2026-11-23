@@ -10,6 +10,10 @@ import com.uniandes.campuseats.data.outbox.OutboxEntry
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.data.outbox.OutboxStore
+import com.uniandes.campuseats.data.ranking.RankingCriterion
+import com.uniandes.campuseats.data.ranking.RankingWindow
+import com.uniandes.campuseats.data.ranking.SnapshotRow
+import com.uniandes.campuseats.data.ranking.StoredRanking
 import com.uniandes.campuseats.data.remote.ProfileLocalSource
 import com.uniandes.campuseats.data.remote.StoredProfile
 
@@ -94,7 +98,48 @@ class LocalStore(
 
     /** Solo el cache de lectura (documentos); no toca datos del usuario ni la cola de salida. */
     suspend fun clearCachedDocuments() {
-        dao.deleteDocumentsExcept(listOf(DATA_OWNER_KEY, LAST_SYNC_KEY))
+        database.withTransaction {
+            dao.deleteDocumentsExcept(listOf(DATA_OWNER_KEY, LAST_SYNC_KEY))
+            dao.clearRankingSnapshots()
+        }
+    }
+
+    suspend fun saveRankingSnapshot(
+        criterion: RankingCriterion,
+        window: RankingWindow,
+        rows: List<SnapshotRow>,
+        computedAt: Long
+    ) {
+        val entities = rows.mapIndexed { index, row ->
+            RankingSnapshotEntity(
+                criterionName = criterion.name,
+                windowName = window.name,
+                generation = CURRENT_RANKING,
+                position = index + 1,
+                restaurantId = row.restaurantId,
+                score = row.score,
+                reviewCount = row.reviewCount,
+                computedAt = computedAt
+            )
+        }
+        database.withTransaction {
+            dao.deleteRankingGeneration(criterion.name, window.name, PREVIOUS_RANKING)
+            dao.moveRankingGeneration(criterion.name, window.name, CURRENT_RANKING, PREVIOUS_RANKING)
+            dao.insertRankingSnapshot(entities)
+        }
+    }
+
+    suspend fun loadRankingSnapshot(
+        criterion: RankingCriterion,
+        window: RankingWindow,
+        generation: Int = CURRENT_RANKING
+    ): StoredRanking? {
+        val rows = dao.rankingSnapshot(criterion.name, window.name, generation)
+        if (rows.isEmpty()) return null
+        return StoredRanking(
+            rows = rows.map { SnapshotRow(it.restaurantId, it.score, it.reviewCount) },
+            computedAt = rows.first().computedAt
+        )
     }
 
     suspend fun documentCount(): Int = dao.documentCount()
@@ -144,6 +189,8 @@ class LocalStore(
         /** Documento que guarda el id del usuario dueño de los datos locales (evita mezclar cuentas). */
         const val DATA_OWNER_KEY = "data_owner"
         const val LAST_SYNC_KEY = "last_sync"
+        const val CURRENT_RANKING = 0
+        const val PREVIOUS_RANKING = 1
     }
 
     suspend fun loadDocument(key: String): CacheDocumentEntity? = dao.document(key)

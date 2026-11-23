@@ -13,6 +13,7 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 
 class RankingRepository(
     private val restaurants: RestaurantRepository,
@@ -42,7 +43,8 @@ class RankingRepository(
         val all = RankingEngine.computeAll(inputs, window)
         val computedAt = System.nanoTime()
         val now = clock()
-        val results = all.map { (key, items) -> RankingResult(key, window, items, now, fromSnapshot = false) }
+        val withMovement = withMovement(window, all, now)
+        val results = withMovement.map { (key, items) -> RankingResult(key, window, items, now, fromSnapshot = false) }
         cache.putAll(results, fingerprint)
         Log.d(
             TAG,
@@ -51,6 +53,27 @@ class RankingRepository(
                 "restaurants=${inputs.restaurants.size} reviews=${inputs.reviews.size}"
         )
         return results.first { it.criterion == criterion }
+    }
+
+    private suspend fun withMovement(
+        window: RankingWindow,
+        all: Map<RankingCriterion, List<RankedRestaurant>>,
+        computedAt: Long
+    ): Map<RankingCriterion, List<RankedRestaurant>> = withContext(Dispatchers.IO) {
+        all.mapValues { (criterion, items) ->
+            if (items.isEmpty()) return@mapValues items
+            val ids = items.map { it.restaurant.id }
+            val current = attemptOrNull { localStore.loadRankingSnapshot(criterion, window, LocalStore.CURRENT_RANKING) }
+            val changed = current?.restaurantIds != ids
+            val baseline = if (changed) current else attemptOrNull {
+                localStore.loadRankingSnapshot(criterion, window, LocalStore.PREVIOUS_RANKING)
+            }
+            if (changed) {
+                val rows = items.map { SnapshotRow(it.restaurant.id, it.score, it.reviewCount) }
+                attemptOrNull { localStore.saveRankingSnapshot(criterion, window, rows, computedAt) }
+            }
+            RankingMovement.apply(items, baseline?.restaurantIds)
+        }
     }
 
     private suspend fun refreshSources() = coroutineScope {

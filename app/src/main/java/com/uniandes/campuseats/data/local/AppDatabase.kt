@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RecentSearchEntity::class,
         ProfileEntity::class,
         CacheDocumentEntity::class,
-        OutboxEntity::class
+        OutboxEntity::class,
+        RankingSnapshotEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,9 +45,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ranking_snapshots` (`criterionName` TEXT NOT NULL, "
+                        + "`windowName` TEXT NOT NULL, `generation` INTEGER NOT NULL, `position` INTEGER NOT NULL, "
+                        + "`restaurantId` TEXT NOT NULL, `score` REAL NOT NULL, `reviewCount` INTEGER NOT NULL, "
+                        + "`computedAt` INTEGER NOT NULL, "
+                        + "PRIMARY KEY(`criterionName`, `windowName`, `generation`, `position`))"
+                )
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }
