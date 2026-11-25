@@ -180,14 +180,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     val reviews = remember { mutableStateListOf<Review>() }
     var myReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
+    var pendingMyReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
     var myReviewsLoading by remember { mutableStateOf(false) }
-    LaunchedEffect(overlay) {
-        if (overlay == Overlay.MyReviews) {
-            myReviewsLoading = true
-            myReviews = attemptOrNull { services.reviewRepository.myReviews() } ?: myReviews
-            myReviewsLoading = false
-        }
-    }
     val crowding = remember { mutableStateMapOf<String, List<Int>>() }
     var savedIds by remember { mutableStateOf(emptySet<String>()) }
     var restaurants by remember { mutableStateOf(emptyList<Restaurant>()) }
@@ -234,6 +228,48 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         val queued = attemptOrNull { localStore.pendingCountExcludingAnalytics() } ?: 0
         val profilePending = if (attemptOrNull { services.profileSynchronizer.hasPending() } == true) 1 else 0
         outboxPending = queued + profilePending
+    }
+
+    LaunchedEffect(overlay, outboxPending) {
+        if (overlay == Overlay.MyReviews) {
+            // Lee las reseñas que estan guardadas en el Room
+            val entries = attemptOrNull { services.localStore.pending() }.orEmpty()
+                .filter { it.request.kind == OutboxKind.REVIEW }
+
+            pendingMyReviews = entries.mapNotNull { entry ->
+                val body = entry.request.body ?: return@mapNotNull null
+                val restaurantId = entry.request.path
+                    .removePrefix("/restaurants/")
+                    .removeSuffix("/reviews")
+                try {
+                    val ratings = ReviewRatings(
+                        taste = (body["taste"] as? Number)?.toInt() ?: 0,
+                        attention = (body["attention"] as? Number)?.toInt() ?: 0,
+                        price = (body["price"] as? Number)?.toInt() ?: 0,
+                        options = (body["options"] as? Number)?.toInt() ?: 0
+                    )
+                    val dietaryOptions = (body["dietary_options"] as? List<*>)
+                        ?.map { it.toString() }
+                        .orEmpty()
+
+                    Review(
+                        id = "pending_${entry.id}",
+                        restaurantId = restaurantId,
+                        author = profile.name.ifEmpty { user.name },
+                        date = "Pending sync...",
+                        ratings = ratings,
+                        dietaryOptions = dietaryOptions,
+                        comment = (body["comment"] as? String).orEmpty()
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            myReviewsLoading = true
+            myReviews = attemptOrNull { services.reviewRepository.myReviews() } ?: myReviews
+            myReviewsLoading = false
+        }
     }
 
     suspend fun refreshRestaurants(force: Boolean = false) {
@@ -727,13 +763,17 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         )
                     }
 
-                    overlay == Overlay.MyReviews -> MyReviewsView(
-                        reviews = myReviews,
-                        restaurantsById = restaurants.associateBy { it.id },
-                        isLoading = myReviewsLoading,
-                        onSelectRestaurant = ::openDetailFromRanking,
-                        onBack = ::popOverlay
-                    )
+                    overlay == Overlay.MyReviews -> {
+                        val pendingRestaurantIds = pendingMyReviews.map { it.restaurantId }.toSet()
+                        val combinedMyReviews = pendingMyReviews + myReviews.filterNot { it.restaurantId in pendingRestaurantIds }
+                        MyReviewsView(
+                            reviews = combinedMyReviews,
+                            restaurantsById = restaurants.associateBy { it.id },
+                            isLoading = myReviewsLoading && combinedMyReviews.isEmpty(),
+                            onSelectRestaurant = ::openDetailFromRanking,
+                            onBack = ::popOverlay
+                        )
+                    }
 
                     overlay == Overlay.Survey -> SurveyView(
                         initialName = profile.name,
