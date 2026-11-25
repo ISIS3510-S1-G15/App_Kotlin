@@ -17,6 +17,7 @@ import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 import java.io.File
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.cachemanager.CacheManager
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.views.MapView
 
@@ -54,12 +55,16 @@ object OfflineMap {
 
     fun prefetchCampus(mapView: MapView) {
         if (prefetched) return
+        val tileSource = mapView.tileProvider.tileSource as? OnlineTileSourceBase
+        if (tileSource == null || !tileSource.tileSourcePolicy.acceptsBulkDownload()) {
+            prefetched = true
+            return
+        }
         // Con ahorro de datos o "solo Wi-Fi" no se descargan tiles por datos moviles
         val services = AppServices.get(mapView.context)
         val prefs = services.preferences.current.value
         val metered = services.connectivity.metered.value
         if (metered && (prefs.dataSaver || prefs.syncOnlyOnWifi)) return
-        // Un solo intento por proceso: antes se reintentaba (y fallaba) en cada recomposicion del mapa
         prefetched = true
         try {
             val area = BoundingBox(

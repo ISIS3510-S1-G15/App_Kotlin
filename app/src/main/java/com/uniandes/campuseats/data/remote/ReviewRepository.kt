@@ -98,6 +98,11 @@ class ReviewRepository(
         return parsed
     }
 
+    suspend fun myReviews(): List<Review> {
+        val rows = api.get("/me/reviews").optJSONArray("items") ?: return emptyList()
+        return (0 until rows.length()).map { reviewFromRemote(rows.getJSONObject(it)) }
+    }
+
     suspend fun revalidate(restaurantId: String, force: Boolean = false): List<Review>? {
         val fresh = !force && policy.isFreshOrFalse(cache, CacheKeys.reviews(restaurantId), CacheTtl.REVIEWS)
         return if (fresh) null else forRestaurant(restaurantId)

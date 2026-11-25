@@ -88,6 +88,7 @@ import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
 import com.uniandes.campuseats.ui.PartnerReportView
 import com.uniandes.campuseats.ui.RankingView
+import com.uniandes.campuseats.ui.MyReviewsView
 import com.uniandes.campuseats.ranking.RankingViewModel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -104,7 +105,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings, Ranking }
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings, Ranking, MyReviews }
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
@@ -178,6 +179,15 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var pendingRestaurant by remember { mutableStateOf<Restaurant?>(null) }
 
     val reviews = remember { mutableStateListOf<Review>() }
+    var myReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
+    var myReviewsLoading by remember { mutableStateOf(false) }
+    LaunchedEffect(overlay) {
+        if (overlay == Overlay.MyReviews) {
+            myReviewsLoading = true
+            myReviews = attemptOrNull { services.reviewRepository.myReviews() } ?: myReviews
+            myReviewsLoading = false
+        }
+    }
     val crowding = remember { mutableStateMapOf<String, List<Int>>() }
     var savedIds by remember { mutableStateOf(emptySet<String>()) }
     var restaurants by remember { mutableStateOf(emptyList<Restaurant>()) }
@@ -502,8 +512,10 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         overlayStack.clear()
     }
 
+    // Se cambio para que cuando se le de click al back si se llego desde las reseñas, nos devuelva a las reseñas
     fun backFromDetail() {
-        if (overlayStack.getOrNull(overlayStack.lastIndex - 1) == Overlay.Ranking) popOverlay() else closeAll()
+        val prev = overlayStack.getOrNull(overlayStack.lastIndex - 1)
+        if (prev == Overlay.Ranking || prev == Overlay.MyReviews) popOverlay() else closeAll()
     }
 
     fun openDetailFromRanking(r: Restaurant) {
@@ -715,6 +727,14 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         )
                     }
 
+                    overlay == Overlay.MyReviews -> MyReviewsView(
+                        reviews = myReviews,
+                        restaurantsById = restaurants.associateBy { it.id },
+                        isLoading = myReviewsLoading,
+                        onSelectRestaurant = ::openDetailFromRanking,
+                        onBack = ::popOverlay
+                    )
+
                     overlay == Overlay.Survey -> SurveyView(
                         initialName = profile.name,
                         onComplete = { answers ->
@@ -824,6 +844,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             showLogoutWarning = auth.showLogoutWarning.collectAsStateWithLifecycle().value,
                             onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
                             onOpenSettings = { overlayStack.add(Overlay.Settings) },
+                            onOpenMyReviews = { overlayStack.add(Overlay.MyReviews) },
                             onLogoutAttempt = { auth.attemptLogout() },
                             // Un solo camino de logout: el ViewModel envia lo pendiente y purga TODO (ver AppServices.purgeUserData)
                             onLogoutConfirm = { auth.confirmLogout() },
