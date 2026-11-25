@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Settings
@@ -63,6 +64,7 @@ fun ProfileView(
     onLogoutAttempt: () -> Unit,
     onLogoutConfirm: () -> Unit,
     onLogoutCancel: () -> Unit,
+    onOpenMyReviews: () -> Unit,
     onBack: () -> Unit
 ) {
     val initials = if (profile.name.isNotEmpty()) profile.name.take(2).uppercase() else "ME"
@@ -396,6 +398,31 @@ fun ProfileView(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "Retake Food Preferences Survey",
+                    color = Ink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+                    .border(1.dp, Outline, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onOpenMyReviews),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.RateReview,
+                    contentDescription = null,
+                    tint = Ink,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "My Reviews",
                     color = Ink,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
