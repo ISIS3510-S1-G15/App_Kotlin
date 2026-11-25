@@ -12,7 +12,7 @@ enum class RankingCriterion(val label: String) {
 }
 
 enum class RankingWindow(val label: String) {
-    WEEK("This week"),
+    MONTH("This month"),
     ALL_TIME("All time")
 }
 
@@ -21,7 +21,8 @@ data class RankedRestaurant(
     val restaurant: Restaurant,
     val score: Double,
     val reviewCount: Int,
-    val movement: Int?
+    val movement: Int?,
+    val isFallback: Boolean = false
 )
 
 data class RankingResult(
@@ -36,7 +37,7 @@ data class RankingInputs(
     val restaurants: List<Restaurant>,
     val reviews: List<Review>,
     val crowding: Map<String, List<Int>>,
-    val weekCutoff: String
+    val windowCutoff: String
 )
 
 data class SnapshotRow(
