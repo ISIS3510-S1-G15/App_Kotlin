@@ -1,6 +1,5 @@
 package com.uniandes.campuseats.auth
 
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -19,7 +18,9 @@ import kotlinx.coroutines.launch
 class AuthViewModel(
     private val repository: AuthRepository,
     private val localStore: LocalStore,
-    private val connectivityObserver: ConnectivityMonitor
+    private val connectivityObserver: ConnectivityMonitor,
+    /** Limpieza unica de datos de usuario (outbox, perfil, caches...). Se usa en TODOS los caminos de logout. */
+    private val purgeUserData: suspend (flushFirst: Boolean) -> Unit = {}
 ) : ViewModel() {
 
     var user by mutableStateOf<AuthUser?>(null)
@@ -46,6 +47,10 @@ class AuthViewModel(
             error = problem
             return
         }
+        if (!connectivityObserver.online.value) {
+            error = NO_CONNECTION
+            return
+        }
         submit { repository.login(email, password) }
     }
 
@@ -55,20 +60,23 @@ class AuthViewModel(
             error = problem
             return
         }
+        if (!connectivityObserver.online.value) {
+            error = NO_CONNECTION
+            return
+        }
         submit { repository.register(name, email, password) }
     }
 
     // Para Eventual Connectivity. Muestra una alerta de que hay datos que no se han sincronizado antes de cerrar sesion si los hay
     fun attemptLogout() {
         viewModelScope.launch {
-            val outboxCount = localStore.count()
+            // Los eventos de analitica no cuentan: el usuario no "pierde" nada si no se envian
+            val outboxCount = localStore.pendingCountExcludingAnalytics()
 
             val profileRecord = localStore.loadProfileRecord()
             val hasPendingProfile = profileRecord?.pendingSync == true
 
             val isOnline = connectivityObserver.online.value
-
-            Log.d("TEST_LOGOUT", "Internet: $isOnline | Outbox: $outboxCount | Perfil Pendiente: $hasPendingProfile")
 
             if (!isOnline && (outboxCount > 0 || hasPendingProfile)) {
                 _showLogoutWarning.value = true
@@ -77,10 +85,25 @@ class AuthViewModel(
             }
         }
     }
+    /** Cierra sesion: envia lo pendiente (si hay red), limpia los datos del usuario y borra el token. */
     fun confirmLogout() {
         _showLogoutWarning.value = false
+        viewModelScope.launch {
+            purgeUserData(true)
+            repository.logout()
+            user = null
+        }
+    }
+
+    /**
+     * El servidor rechazo el token (401) mientras sincronizaba. Se cierra la sesion SIN borrar la cola de
+     * salida: al volver a entrar con la misma cuenta los cambios pendientes se envian.
+     */
+    fun onSessionExpired() {
+        if (user == null) return
         repository.logout()
         user = null
+        error = "Your session expired. Sign in again to sync your pending changes."
     }
 
     fun cancelLogout() {
@@ -100,6 +123,10 @@ class AuthViewModel(
                 user = action()
             } catch (e: AuthException) {
                 error = e.message
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = "Something went wrong. Try again."
             } finally {
                 loading = false
             }
@@ -107,10 +134,13 @@ class AuthViewModel(
     }
 
     companion object {
+        private const val NO_CONNECTION = "No internet connection. Connect to the internet to sign in."
+
         fun factory(repository: AuthRepository,
                     localStore: LocalStore,
-                    connectivityObserver: ConnectivityMonitor): ViewModelProvider.Factory = viewModelFactory {
-            initializer { AuthViewModel(repository, localStore, connectivityObserver) }
+                    connectivityObserver: ConnectivityMonitor,
+                    purgeUserData: suspend (Boolean) -> Unit = {}): ViewModelProvider.Factory = viewModelFactory {
+            initializer { AuthViewModel(repository, localStore, connectivityObserver, purgeUserData) }
         }
     }
 }

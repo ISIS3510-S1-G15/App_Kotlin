@@ -75,21 +75,24 @@ class OutboxFlusherTest {
         val store = MemoryOutbox().apply { enqueue(saved); enqueue(occupancy); enqueue(unsaved) }
         val api = ScriptedApi()
         val result = OutboxFlusher(api, store).flush()
-        assertEquals(listOf("PUT /me/saved/1", "POST /occupancy/reports", "DELETE /me/saved/1"), api.calls)
+        // Las categorias se envian en paralelo; el orden solo se garantiza dentro de cada una
+        assertEquals(listOf("PUT /me/saved/1", "DELETE /me/saved/1"), api.calls.filter { it.contains("/me/saved") })
+        assertEquals(1, api.calls.count { it == "POST /occupancy/reports" })
+        assertEquals(3, api.calls.size)
         assertEquals(setOf(OutboxKind.SAVED, OutboxKind.OCCUPANCY), result.sentKinds)
         assertEquals(0, result.remaining)
         assertEquals(0, result.dropped)
     }
 
     @Test
-    fun stopsAtTheFirstNetworkFailureAndKeepsTheRest() = runTest {
+    fun aNetworkFailureOnlyStopsItsOwnCategory() = runTest {
         val store = MemoryOutbox().apply { enqueue(saved); enqueue(occupancy); enqueue(analytics) }
         val api = ScriptedApi().apply { failOn("/occupancy/reports", IOException("offline")) }
         val result = OutboxFlusher(api, store).flush()
-        assertEquals(setOf(OutboxKind.SAVED), result.sentKinds)
-        assertEquals(2, result.remaining)
-        assertEquals(listOf("PUT /me/saved/1", "POST /occupancy/reports"), api.calls)
-        assertEquals(0, store.entries.first().attempts)
+        assertEquals(setOf(OutboxKind.SAVED, OutboxKind.ANALYTICS), result.sentKinds)
+        assertEquals(1, result.remaining)
+        assertEquals(OutboxKind.OCCUPANCY, store.entries.single().request.kind)
+        assertEquals(0, store.entries.single().attempts)
     }
 
     @Test
@@ -97,11 +100,12 @@ class OutboxFlusherTest {
         val store = MemoryOutbox().apply { enqueue(saved); enqueue(occupancy) }
         val api = ScriptedApi().apply { failOn("/me/saved/1", IOException("offline")) }
         val flusher = OutboxFlusher(api, store)
-        assertEquals(2, flusher.flush().remaining)
+        // occupancy no depende de saved, asi que sale aunque saved siga offline
+        assertEquals(1, flusher.flush().remaining)
         api.recover()
         val result = flusher.flush()
         assertEquals(0, result.remaining)
-        assertEquals(setOf(OutboxKind.SAVED, OutboxKind.OCCUPANCY), result.sentKinds)
+        assertEquals(setOf(OutboxKind.SAVED), result.sentKinds)
     }
 
     @Test
@@ -120,8 +124,10 @@ class OutboxFlusherTest {
         val api = ScriptedApi().apply { failOn("/me/saved/1", ApiException(401, "")) }
         val result = OutboxFlusher(api, store).flush()
         assertEquals(0, result.dropped)
-        assertEquals(2, result.remaining)
-        assertEquals(0, store.entries.first().attempts)
+        assertTrue(result.authExpired)
+        assertEquals(1, result.remaining) // la peticion con 401 se conserva; la otra categoria si sale
+        assertEquals(OutboxKind.SAVED, store.entries.single().request.kind)
+        assertEquals(0, store.entries.single().attempts)
     }
 
     @Test
@@ -129,13 +135,14 @@ class OutboxFlusherTest {
         val store = MemoryOutbox().apply { enqueue(occupancy); enqueue(analytics) }
         val api = ScriptedApi().apply { failOn("/occupancy/reports", ApiException(500, "")) }
         val flusher = OutboxFlusher(api, store, maxAttempts = 3)
-        assertEquals(2, flusher.flush().remaining)
-        assertEquals(1, store.entries.first().attempts)
-        assertEquals(2, flusher.flush().remaining)
-        val last = flusher.flush()
+        // la analitica (otra categoria) sale en el primer flush; occupancy se queda reintentando
+        assertEquals(1, flusher.flush(ignoreBackoff = true).remaining)
+        assertEquals(1, store.entries.single().attempts)
+        assertEquals(1, flusher.flush(ignoreBackoff = true).remaining)
+        val last = flusher.flush(ignoreBackoff = true)
         assertEquals(1, last.dropped)
-        assertEquals(1, last.remaining)
-        assertEquals(OutboxKind.ANALYTICS, store.entries.single().request.kind)
+        assertEquals(0, last.remaining)
+        assertTrue(store.entries.isEmpty())
     }
 
     @Test

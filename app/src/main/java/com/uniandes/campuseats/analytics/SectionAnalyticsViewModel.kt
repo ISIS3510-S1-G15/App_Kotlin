@@ -5,8 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.uniandes.campuseats.AppServices
-import com.uniandes.campuseats.data.outbox.OutboxKind
-import com.uniandes.campuseats.data.outbox.OutboxRequest
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,13 +30,11 @@ class SectionAnalyticsViewModel(
     companion object {
         fun factory(services: AppServices): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ -> })
                 val tracker = SectionAnalyticsTracker(
                     services.analyticsTransport,
                     scope,
-                    keepForLater = { path, body ->
-                        services.outboxStore.enqueue(OutboxRequest(OutboxKind.ANALYTICS, "POST", path, body))
-                    }
+                    keepForLater = services::keepAnalyticsForLater
                 )
                 SectionAnalyticsViewModel(tracker, scope)
             }

@@ -65,6 +65,12 @@ interface AppDao {
     @Query("UPDATE outbox SET attempts = attempts + 1 WHERE id = :id")
     suspend fun bumpOutboxAttempts(id: Long)
 
+    @Query("UPDATE outbox SET nextAttemptAt = :notBefore WHERE id = :id")
+    suspend fun setOutboxRetryAt(id: Long, notBefore: Long)
+
+    @Query("SELECT COUNT(*) FROM outbox WHERE kind != :excludedKind")
+    suspend fun outboxCountExcluding(excludedKind: String): Int
+
     @Query("SELECT COUNT(*) FROM outbox")
     suspend fun outboxCount(): Int
 
@@ -74,6 +80,18 @@ interface AppDao {
     @Query("DELETE FROM outbox WHERE id NOT IN (SELECT id FROM outbox ORDER BY id DESC LIMIT :keep)")
     suspend fun trimOutbox(keep: Int)
 
+    @Query("DELETE FROM cache_documents WHERE `key` LIKE :prefix || '%'")
+    suspend fun deleteDocumentsWithPrefix(prefix: String)
+
+    @Query("SELECT COUNT(*) FROM cache_documents")
+    suspend fun documentCount(): Int
+
+    @Query("SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM cache_documents")
+    suspend fun documentBytes(): Long
+
+    @Query("DELETE FROM cache_documents WHERE `key` NOT IN (:keep)")
+    suspend fun deleteDocumentsExcept(keep: List<String>)
+
     @Query("SELECT * FROM cache_documents WHERE `key` = :key")
     suspend fun document(key: String): CacheDocumentEntity?
 
@@ -82,4 +100,25 @@ interface AppDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDocument(document: CacheDocumentEntity)
+
+    @Query(
+        "SELECT * FROM ranking_snapshots WHERE criterionName = :criterion AND windowName = :window " +
+            "AND generation = :generation ORDER BY position"
+    )
+    suspend fun rankingSnapshot(criterion: String, window: String, generation: Int): List<RankingSnapshotEntity>
+
+    @Query("DELETE FROM ranking_snapshots WHERE criterionName = :criterion AND windowName = :window AND generation = :generation")
+    suspend fun deleteRankingGeneration(criterion: String, window: String, generation: Int)
+
+    @Query(
+        "UPDATE ranking_snapshots SET generation = :to WHERE criterionName = :criterion AND windowName = :window " +
+            "AND generation = :from"
+    )
+    suspend fun moveRankingGeneration(criterion: String, window: String, from: Int, to: Int)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRankingSnapshot(items: List<RankingSnapshotEntity>)
+
+    @Query("DELETE FROM ranking_snapshots")
+    suspend fun clearRankingSnapshots()
 }

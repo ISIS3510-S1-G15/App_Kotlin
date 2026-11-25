@@ -16,6 +16,7 @@ object CacheTtl {
     const val REVIEW_SUMMARIES = 10 * 60 * 1000L
     const val OCCUPANCY = 2 * 60 * 1000L
     const val PARTNER_REPORT = 15 * 60 * 1000L
+    const val RANKING = 30 * 60 * 1000L
 }
 
 object CacheKeys {
@@ -25,17 +26,25 @@ object CacheKeys {
     const val REVIEW_SUMMARIES = "review_summaries.v$SCHEMA_VERSION"
     const val OCCUPANCY = "occupancy.v$SCHEMA_VERSION"
 
+    const val PARTNER_REPORT_PREFIX = "partner_report."
+
     fun reviews(restaurantId: String) = "reviews.v$SCHEMA_VERSION.$restaurantId"
     fun partnerReport(userId: Int, restaurantId: String, days: Int) = "partner_report.v$SCHEMA_VERSION.$userId.$restaurantId.$days"
 }
 
-class CachePolicy(private val clock: () -> Long = System::currentTimeMillis) {
+/**
+ * [ttlScale] viene de las preferencias del usuario (SHORT/NORMAL/LONG) y multiplica todos los TTL.
+ */
+class CachePolicy(
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val ttlScale: () -> Double = { 1.0 }
+) {
 
     fun now(): Long = clock()
 
     fun isFresh(fetchedAt: Long?, ttlMs: Long): Boolean {
         if (fetchedAt == null || fetchedAt <= 0L) return false
-        return clock() - fetchedAt in 0 until ttlMs
+        return clock() - fetchedAt in 0 until (ttlMs * ttlScale()).toLong()
     }
 
     suspend fun isFresh(cache: DocumentCache, key: String, ttlMs: Long): Boolean =

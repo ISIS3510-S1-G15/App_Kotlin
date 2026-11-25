@@ -34,7 +34,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.getCrowdingLevel
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
@@ -103,7 +102,7 @@ fun CrowdingModal(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                AsyncImage(
+                RestaurantImage(
                     model = restaurant.image,
                     contentDescription = restaurant.name,
                     modifier = Modifier

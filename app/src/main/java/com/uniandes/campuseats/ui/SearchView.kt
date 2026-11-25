@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import android.location.Location
-import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.formatDistance
 import com.uniandes.campuseats.data.Restaurant
@@ -474,7 +473,7 @@ private fun SearchResultRow(
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncImage(
+        RestaurantImage(
             model = restaurant.image,
             contentDescription = restaurant.name,
             modifier = Modifier

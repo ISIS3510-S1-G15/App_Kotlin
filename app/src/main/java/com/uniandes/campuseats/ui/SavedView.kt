@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.location.Location
-import coil.compose.AsyncImage
 import com.uniandes.campuseats.sensor.locationLabel
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
@@ -360,7 +359,7 @@ fun SavedView(
                                 .fillMaxWidth()
                                 .height(80.dp)
                         ) {
-                            AsyncImage(
+                            RestaurantImage(
                                 model = r.image,
                                 contentDescription = r.name,
                                 contentScale = ContentScale.Crop,
@@ -436,7 +435,7 @@ private fun SavedCard(
                 .fillMaxWidth()
                 .height(130.dp)
         ) {
-            AsyncImage(
+            RestaurantImage(
                 model = r.image,
                 contentDescription = r.name,
                 contentScale = ContentScale.Crop,

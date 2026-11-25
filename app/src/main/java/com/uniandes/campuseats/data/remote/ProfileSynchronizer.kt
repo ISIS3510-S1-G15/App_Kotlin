@@ -25,6 +25,17 @@ class ProfileSynchronizer(
         if (pushed) local.markProfileSynced(profile)
     }
 
+    /** true si hay un perfil editado sin subir al servidor. */
+    suspend fun hasPending(): Boolean = local.loadProfileRecord()?.pendingSync == true
+
+    /** Reintenta subir un perfil pendiente (reconexion / WorkManager). Devuelve true si ya no queda nada pendiente. */
+    suspend fun syncPending(): Boolean {
+        val stored = local.loadProfileRecord() ?: return true
+        if (!stored.pendingSync) return true
+        update(stored.profile)
+        return local.loadProfileRecord()?.pendingSync != true
+    }
+
     suspend fun resolve(fallbackName: String): Profile? {
         val stored = local.loadProfileRecord()
         if (stored != null && stored.pendingSync) {

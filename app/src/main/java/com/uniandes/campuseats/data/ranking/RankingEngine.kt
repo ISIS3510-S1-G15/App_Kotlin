@@ -2,6 +2,12 @@ package com.uniandes.campuseats.data.ranking
 
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 object RankingEngine {
 
@@ -9,18 +15,52 @@ object RankingEngine {
     private const val CROWDING_SCALE_TOP = 6.0
     private const val NEUTRAL_CROWDING = 3.0
 
-    fun compute(inputs: RankingInputs, criterion: RankingCriterion, window: RankingWindow): List<RankedRestaurant> {
-        val reviewsByRestaurant = inputs.reviews
+    private class Prepared(
+        val inputs: RankingInputs,
+        val window: RankingWindow,
+        val reviewsByRestaurant: Map<String, List<Review>>
+    )
+
+    private class Sample(val restaurant: Restaurant, val average: Double, val count: Int)
+
+    suspend fun computeAll(inputs: RankingInputs, window: RankingWindow): Map<RankingCriterion, List<RankedRestaurant>> {
+        val prepared = withContext(Dispatchers.Default) { prepare(inputs, window) }
+        return coroutineScope {
+            RankingCriterion.entries
+                .map { criterion -> criterion to async(Dispatchers.Default) { rank(prepared, criterion) } }
+                .map { (criterion, deferred) -> criterion to deferred.await() }
+                .toMap()
+        }
+    }
+
+    suspend fun compute(inputs: RankingInputs, criterion: RankingCriterion, window: RankingWindow): List<RankedRestaurant> =
+        withContext(Dispatchers.Default) { rank(prepare(inputs, window), criterion) }
+
+    private suspend fun prepare(inputs: RankingInputs, window: RankingWindow): Prepared {
+        currentCoroutineContext().ensureActive()
+        val grouped = inputs.reviews
             .filter { window == RankingWindow.ALL_TIME || it.date >= inputs.weekCutoff }
             .groupBy { it.restaurantId }
+        return Prepared(inputs, window, grouped)
+    }
 
-        val samples = inputs.restaurants.mapNotNull { restaurant ->
-            sampleFor(restaurant, reviewsByRestaurant[restaurant.id].orEmpty(), inputs.crowding[restaurant.id].orEmpty(), criterion, window)
+    private suspend fun rank(prepared: Prepared, criterion: RankingCriterion): List<RankedRestaurant> {
+        val context = currentCoroutineContext()
+        val samples = prepared.inputs.restaurants.mapNotNull { restaurant ->
+            context.ensureActive()
+            sampleFor(
+                restaurant,
+                prepared.reviewsByRestaurant[restaurant.id].orEmpty(),
+                prepared.inputs.crowding[restaurant.id].orEmpty(),
+                criterion,
+                prepared.window
+            )
         }
         if (samples.isEmpty()) return emptyList()
 
         val globalMean = samples.sumOf { it.average * it.count } / samples.sumOf { it.count }.coerceAtLeast(1)
 
+        context.ensureActive()
         return samples
             .map { it to smooth(it.average, it.count, globalMean) }
             .sortedWith(
@@ -38,8 +78,6 @@ object RankingEngine {
                 )
             }
     }
-
-    private class Sample(val restaurant: Restaurant, val average: Double, val count: Int)
 
     private fun sampleFor(
         restaurant: Restaurant,
