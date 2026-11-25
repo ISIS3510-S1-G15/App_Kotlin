@@ -26,7 +26,7 @@ class RankingEngineTest {
     )
 
     private fun inputs(reviews: List<Review>, crowding: Map<String, List<Int>> = emptyMap()) =
-        RankingInputs(restaurants, reviews, crowding, weekCutoff = "2026-11-16")
+        RankingInputs(restaurants, reviews, crowding, windowCutoff = "2026-11-16")
 
     @Test
     fun computeAllReturnsEveryCriterion() = runTest {
@@ -68,13 +68,28 @@ class RankingEngineTest {
     }
 
     @Test
-    fun weekWindowIgnoresOldReviews() = runTest {
+    fun monthWindowRanksRecentReviewsFirstAndKeepsOthersAsFallback() = runTest {
         val reviews = listOf(
             review("r1", "1", "2026-11-01", 5),
             review("r2", "2", "2026-11-20", 3)
         )
-        val ranking = RankingEngine.compute(inputs(reviews), RankingCriterion.TASTE, RankingWindow.WEEK)
-        assertEquals(listOf("2"), ranking.map { it.restaurant.id })
+        val ranking = RankingEngine.compute(inputs(reviews), RankingCriterion.TASTE, RankingWindow.MONTH)
+        assertEquals(listOf("2", "1"), ranking.map { it.restaurant.id })
+        assertEquals(listOf(false, true), ranking.map { it.isFallback })
+    }
+
+    @Test
+    fun allTimeWindowNeverMarksFallback() = runTest {
+        val reviews = listOf(review("r1", "1", "2026-11-01", 5), review("r2", "2", "2026-11-20", 3))
+        val ranking = RankingEngine.compute(inputs(reviews), RankingCriterion.TASTE, RankingWindow.ALL_TIME)
+        assertTrue(ranking.none { it.isFallback })
+    }
+
+    @Test
+    fun restaurantsWithoutAnyReviewStillRankOverallFromTheirRating() = runTest {
+        val ranking = RankingEngine.compute(inputs(emptyList()), RankingCriterion.OVERALL, RankingWindow.MONTH)
+        assertEquals(restaurants.map { it.id }.toSet(), ranking.map { it.restaurant.id }.toSet())
+        assertTrue(ranking.all { it.isFallback })
     }
 
     @Test

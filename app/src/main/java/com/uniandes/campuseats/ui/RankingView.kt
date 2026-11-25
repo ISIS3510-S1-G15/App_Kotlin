@@ -233,7 +233,7 @@ private fun RankingRow(item: RankedRestaurant, onClick: () -> Unit) {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "${String.format(Locale.US, "%.2f", item.score)} · ${item.reviewCount} ${if (item.reviewCount == 1) "rating" else "ratings"}",
+                text = "${String.format(Locale.US, "%.2f", item.score)} · ${item.reviewCount} ${if (item.reviewCount == 1) "rating" else "ratings"}${if (item.isFallback) " · none this month" else ""}",
                 color = Muted,
                 fontSize = 12.sp
             )
