@@ -6,7 +6,7 @@ object RankingFingerprint {
 
     fun of(inputs: RankingInputs, window: RankingWindow): Long {
         var hash = window.ordinal.toLong() + 1
-        if (window == RankingWindow.WEEK) hash = mix(hash, inputs.weekCutoff.hashCode().toLong())
+        if (window == RankingWindow.MONTH) hash = mix(hash, inputs.windowCutoff.hashCode().toLong())
         inputs.restaurants.forEach {
             hash = mix(hash, it.id.hashCode().toLong())
             hash = mix(hash, it.rating.hashCode().toLong())

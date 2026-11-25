@@ -15,7 +15,7 @@ class RankingSnapshotsTest {
 
     @Test
     fun restoresOrderScoresAndTimestamp() {
-        val result = RankingSnapshots.restore(RankingCriterion.TASTE, RankingWindow.WEEK, stored, null, restaurants)!!
+        val result = RankingSnapshots.restore(RankingCriterion.TASTE, RankingWindow.MONTH, stored, null, restaurants)!!
         assertEquals(listOf("2", "1", "3"), result.items.map { it.restaurant.id })
         assertEquals(listOf(1, 2, 3), result.items.map { it.position })
         assertEquals(4.5, result.items.first().score, 0.0)
@@ -26,21 +26,21 @@ class RankingSnapshotsTest {
     @Test
     fun skipsRestaurantsThatNoLongerExist() {
         val withGhost = stored.copy(rows = listOf(SnapshotRow("gone", 5.0, 1)) + stored.rows)
-        val result = RankingSnapshots.restore(RankingCriterion.TASTE, RankingWindow.WEEK, withGhost, null, restaurants)!!
+        val result = RankingSnapshots.restore(RankingCriterion.TASTE, RankingWindow.MONTH, withGhost, null, restaurants)!!
         assertEquals(listOf("2", "1", "3"), result.items.map { it.restaurant.id })
         assertEquals(listOf(1, 2, 3), result.items.map { it.position })
     }
 
     @Test
     fun returnsNullWhenNothingMatches() {
-        val result = RankingSnapshots.restore(RankingCriterion.TASTE, RankingWindow.WEEK, stored, null, emptyList())
+        val result = RankingSnapshots.restore(RankingCriterion.TASTE, RankingWindow.MONTH, stored, null, emptyList())
         assertNull(result)
     }
 
     @Test
     fun appliesMovementAgainstPreviousSnapshot() {
         val result = RankingSnapshots.restore(
-            RankingCriterion.TASTE, RankingWindow.WEEK, stored, listOf("1", "2", "3"), restaurants
+            RankingCriterion.TASTE, RankingWindow.MONTH, stored, listOf("1", "2", "3"), restaurants
         )!!
         assertEquals(listOf(1, -1, 0), result.items.map { it.movement })
     }

@@ -18,10 +18,11 @@ object RankingEngine {
     private class Prepared(
         val inputs: RankingInputs,
         val window: RankingWindow,
-        val reviewsByRestaurant: Map<String, List<Review>>
+        val reviewsByRestaurant: Map<String, List<Review>>,
+        val allReviewsByRestaurant: Map<String, List<Review>>
     )
 
-    private class Sample(val restaurant: Restaurant, val average: Double, val count: Int)
+    private class Sample(val restaurant: Restaurant, val average: Double, val count: Int, val fallback: Boolean = false)
 
     suspend fun computeAll(inputs: RankingInputs, window: RankingWindow): Map<RankingCriterion, List<RankedRestaurant>> {
         val prepared = withContext(Dispatchers.Default) { prepare(inputs, window) }
@@ -39,9 +40,9 @@ object RankingEngine {
     private suspend fun prepare(inputs: RankingInputs, window: RankingWindow): Prepared {
         currentCoroutineContext().ensureActive()
         val grouped = inputs.reviews
-            .filter { window == RankingWindow.ALL_TIME || it.date >= inputs.weekCutoff }
+            .filter { window == RankingWindow.ALL_TIME || it.date >= inputs.windowCutoff }
             .groupBy { it.restaurantId }
-        return Prepared(inputs, window, grouped)
+        return Prepared(inputs, window, grouped, inputs.reviews.groupBy { it.restaurantId })
     }
 
     private suspend fun rank(prepared: Prepared, criterion: RankingCriterion): List<RankedRestaurant> {
@@ -51,6 +52,7 @@ object RankingEngine {
             sampleFor(
                 restaurant,
                 prepared.reviewsByRestaurant[restaurant.id].orEmpty(),
+                prepared.allReviewsByRestaurant[restaurant.id].orEmpty(),
                 prepared.inputs.crowding[restaurant.id].orEmpty(),
                 criterion,
                 prepared.window
@@ -64,7 +66,8 @@ object RankingEngine {
         return samples
             .map { it to smooth(it.average, it.count, globalMean) }
             .sortedWith(
-                compareByDescending<Pair<Sample, Double>> { it.second }
+                compareBy<Pair<Sample, Double>> { it.first.fallback }
+                    .thenByDescending { it.second }
                     .thenByDescending { it.first.count }
                     .thenBy { it.first.restaurant.name }
             )
@@ -74,7 +77,8 @@ object RankingEngine {
                     restaurant = sample.restaurant,
                     score = score,
                     reviewCount = sample.count,
-                    movement = null
+                    movement = null,
+                    isFallback = sample.fallback
                 )
             }
     }
@@ -82,6 +86,7 @@ object RankingEngine {
     private fun sampleFor(
         restaurant: Restaurant,
         reviews: List<Review>,
+        allReviews: List<Review>,
         crowdingReports: List<Int>,
         criterion: RankingCriterion,
         window: RankingWindow
@@ -92,10 +97,15 @@ object RankingEngine {
         }
         else -> {
             val values = reviews.map { valueOf(it, criterion) }
+            val outsideWindow = window == RankingWindow.MONTH
             when {
                 values.isNotEmpty() -> Sample(restaurant, values.average(), values.size)
-                criterion == RankingCriterion.OVERALL && window == RankingWindow.ALL_TIME && restaurant.reviews > 0 ->
-                    Sample(restaurant, restaurant.rating, restaurant.reviews)
+                allReviews.isNotEmpty() -> {
+                    val older = allReviews.map { valueOf(it, criterion) }
+                    Sample(restaurant, older.average(), older.size, fallback = outsideWindow)
+                }
+                criterion == RankingCriterion.OVERALL && restaurant.reviews > 0 ->
+                    Sample(restaurant, restaurant.rating, restaurant.reviews, fallback = outsideWindow)
                 else -> null
             }
         }

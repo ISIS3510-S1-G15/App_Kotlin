@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 
 data class RankingUiState(
     val criterion: RankingCriterion = RankingCriterion.OVERALL,
-    val window: RankingWindow = RankingWindow.WEEK,
+    val window: RankingWindow = RankingWindow.MONTH,
     val items: List<RankedRestaurant> = emptyList(),
     val loading: Boolean = true,
     val online: Boolean = true,

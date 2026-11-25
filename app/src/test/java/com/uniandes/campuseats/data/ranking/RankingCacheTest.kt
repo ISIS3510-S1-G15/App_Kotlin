@@ -26,7 +26,7 @@ class RankingCacheTest {
     )
 
     private fun inputs(reviews: List<Review>, crowding: Map<String, List<Int>> = emptyMap()) =
-        RankingInputs(restaurants, reviews, crowding, weekCutoff = "2026-11-16")
+        RankingInputs(restaurants, reviews, crowding, windowCutoff = "2026-11-16")
 
     @Test
     fun hitWhenFingerprintMatches() {
@@ -51,7 +51,7 @@ class RankingCacheTest {
         val cache = RankingCache()
         cache.put(result(RankingCriterion.TASTE), 42L)
         assertNull(cache.get(RankingCriterion.VALUE, RankingWindow.ALL_TIME, 42L))
-        assertNull(cache.get(RankingCriterion.TASTE, RankingWindow.WEEK, 42L))
+        assertNull(cache.get(RankingCriterion.TASTE, RankingWindow.MONTH, 42L))
     }
 
     @Test
@@ -119,7 +119,7 @@ class RankingCacheTest {
     fun fingerprintDiffersPerWindow() {
         val data = inputs(listOf(review("r1", 5)))
         assertNotEquals(
-            RankingFingerprint.of(data, RankingWindow.WEEK),
+            RankingFingerprint.of(data, RankingWindow.MONTH),
             RankingFingerprint.of(data, RankingWindow.ALL_TIME)
         )
     }

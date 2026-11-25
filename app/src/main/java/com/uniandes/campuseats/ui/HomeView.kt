@@ -204,7 +204,7 @@ fun HomeView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
                             text = "UNIVERSIDAD DE LOS ANDES",
                             color = Orange,

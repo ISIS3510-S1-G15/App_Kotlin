@@ -139,14 +139,14 @@ class RankingRepository(
             restaurants = applyRatingSummaries(base.await(), summaries.await()),
             reviews = allReviews.await(),
             crowding = crowding.await(),
-            weekCutoff = weekCutoff()
+            windowCutoff = windowCutoff()
         )
     }
 
-    private fun weekCutoff(): String {
+    private fun windowCutoff(): String {
         val calendar = Calendar.getInstance().apply {
             timeInMillis = clock()
-            add(Calendar.DAY_OF_YEAR, -WEEK_DAYS)
+            add(Calendar.DAY_OF_YEAR, -WINDOW_DAYS)
         }
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
     }
@@ -156,7 +156,7 @@ class RankingRepository(
     private companion object {
         const val TAG = "Ranking"
         const val REFRESH_KEY = "ranking_last_refresh"
-        const val WEEK_DAYS = 7
+        const val WINDOW_DAYS = 30
         const val NANOS_PER_MILLI = 1_000_000L
     }
 }
