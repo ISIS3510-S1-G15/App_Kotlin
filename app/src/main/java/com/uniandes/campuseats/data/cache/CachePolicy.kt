@@ -12,9 +12,9 @@ interface DocumentCache {
 object CacheTtl {
     const val CATALOG = 24 * 60 * 60 * 1000L
     const val RESTAURANTS = 60 * 60 * 1000L
-    const val REVIEWS = 10 * 60 * 1000L
-    const val REVIEW_SUMMARIES = 10 * 60 * 1000L
-    const val OCCUPANCY = 2 * 60 * 1000L
+    const val REVIEWS = 3 * 60 * 1000L
+    const val REVIEW_SUMMARIES = 3 * 60 * 1000L
+    const val OCCUPANCY = 1 * 60 * 1000L
     const val PARTNER_REPORT = 15 * 60 * 1000L
     const val RANKING = 30 * 60 * 1000L
 }

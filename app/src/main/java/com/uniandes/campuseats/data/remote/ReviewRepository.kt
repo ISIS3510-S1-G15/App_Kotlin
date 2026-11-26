@@ -23,6 +23,7 @@ private const val REVIEW_PARALLELISM = 4
 private const val MAX_COMMENT = 300
 private const val MAX_DIETARY_OPTIONS = 10
 private const val DATE_LENGTH = 10
+private const val MY_REVIEWS_CACHE_KEY = "my_reviews"
 
 data class RatingSummary(val restaurantId: String, val rating: Double, val reviewCount: Int)
 
@@ -98,9 +99,45 @@ class ReviewRepository(
         return parsed
     }
 
-    suspend fun myReviews(): List<Review> {
-        val rows = api.get("/me/reviews").optJSONArray("items") ?: return emptyList()
+    private fun parseMyReviews(json: JSONObject): List<Review> {
+        val rows = json.optJSONArray("items") ?: return emptyList()
         return (0 until rows.length()).map { reviewFromRemote(rows.getJSONObject(it)) }
+    }
+
+    suspend fun myReviews(): List<Review> {
+        val json = api.get("/me/reviews")
+        val parsed = parseMyReviews(json)
+        memory?.put(MY_REVIEWS_CACHE_KEY, parsed)
+        cache.save(MY_REVIEWS_CACHE_KEY, json.toString(), policy.now())
+        return parsed
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    suspend fun cachedMyReviews(): List<Review> {
+        (memory?.get(MY_REVIEWS_CACHE_KEY) as? List<Review>)?.let { return it }
+        val raw = attemptOrNull { cache.load(MY_REVIEWS_CACHE_KEY) }?.takeIf { it.isNotBlank() }
+            ?: return emptyList()
+        val parsed = attemptOrNull { parseMyReviews(JSONObject(raw)) }
+        if (parsed == null) {
+            attemptOrNull { cache.clear(MY_REVIEWS_CACHE_KEY) }
+            return emptyList()
+        }
+        memory?.put(MY_REVIEWS_CACHE_KEY, parsed)
+        return parsed
+    }
+
+    suspend fun revalidateMyReviews(force: Boolean = false): List<Review>? {
+        val fresh = !force && policy.isFreshOrFalse(cache, MY_REVIEWS_CACHE_KEY, CacheTtl.REVIEWS)
+        return if (fresh) null else myReviews()
+    }
+
+    suspend fun myReviewsLastSync(): Long? = attemptOrNull {
+        cache.fetchedAt(MY_REVIEWS_CACHE_KEY)
+    }
+
+    suspend fun clearMyReviewsCache() {
+        memory?.invalidate(MY_REVIEWS_CACHE_KEY)
+        attemptOrNull { cache.clear(MY_REVIEWS_CACHE_KEY) }
     }
 
     suspend fun revalidate(restaurantId: String, force: Boolean = false): List<Review>? {

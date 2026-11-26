@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.text.format.DateUtils
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
 import com.uniandes.campuseats.data.ReviewRatings
@@ -78,6 +79,8 @@ private fun Double.oneDecimal() = String.format(Locale.US, "%.1f", this)
 fun MyReviewsView(
     reviews: List<Review>,
     restaurantsById: Map<String, Restaurant>,
+    isOnline: Boolean = true,
+    lastSyncTime: Long? = null,
     isLoading: Boolean,
     onSelectRestaurant: (Restaurant) -> Unit,
     onBack: () -> Unit
@@ -112,6 +115,30 @@ fun MyReviewsView(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = OutfitFontFamily
+                )
+            }
+        }
+
+        // Freshness banner
+        if (!isOnline && lastSyncTime != null) {
+            val timeString = DateUtils.getRelativeTimeSpanString(
+                lastSyncTime,
+                System.currentTimeMillis(),
+                DateUtils.MINUTE_IN_MILLIS
+            ).toString().lowercase()
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFFFF3CD))
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No connection. Showing reviews from $timeString",
+                    color = Color(0xFF856404),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }

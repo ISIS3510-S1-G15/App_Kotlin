@@ -157,6 +157,7 @@ class AppServices private constructor(val appContext: Context) {
         if (owner != null && owner != userId.toString()) {
             localStore.clearUserData()
             attemptOrNull { reviewDraftStore.clearAll() }
+            attemptOrNull { reviewRepository.clearMyReviewsCache() }
             clearMemoryCaches()
         }
         localStore.saveDocument(LocalStore.DATA_OWNER_KEY, userId.toString(), System.currentTimeMillis())
@@ -175,6 +176,7 @@ class AppServices private constructor(val appContext: Context) {
         attemptOrNull { preferences.clearHomeFilters() }
         // Agregado para que los borradores de las reseñas se borren tambien al cerrar sesion
         attemptOrNull { reviewDraftStore.clearAll() }
+        attemptOrNull { reviewRepository.clearMyReviewsCache() }
         clearMemoryCaches()
         syncScheduler.cancelAll()
         _sessionExpired.value = false

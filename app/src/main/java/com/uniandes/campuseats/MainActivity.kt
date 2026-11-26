@@ -63,6 +63,7 @@ import com.uniandes.campuseats.data.prefs.HomeFilterState
 import com.uniandes.campuseats.data.remote.appLevelFromRemote
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
+import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.rememberUserLocation
@@ -200,6 +201,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     // Fuente unica de verdad de conectividad (red con internet validado)
     val online by services.connectivity.online.collectAsStateWithLifecycle()
     var lastSyncTime by remember { mutableStateOf<Long?>(null) }
+    var reviewsLastSyncTime by remember { mutableStateOf<Long?>(null) }
+    var myReviewsLastSyncTime by remember { mutableStateOf<Long?>(null) }
 
     // Cambios hechos offline que aun no llegaron al servidor: se re-aplican encima de lo que baje de la red
     suspend fun pendingCrowding(): Map<String, List<Int>> =
@@ -230,7 +233,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         outboxPending = queued + profilePending
     }
 
-    LaunchedEffect(overlay, outboxPending) {
+    LaunchedEffect(overlay, outboxPending, online) {
         if (overlay == Overlay.MyReviews) {
             // Lee las reseñas que estan guardadas en el Room
             val entries = attemptOrNull { services.localStore.pending() }.orEmpty()
@@ -261,13 +264,21 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         dietaryOptions = dietaryOptions,
                         comment = (body["comment"] as? String).orEmpty()
                     )
+
                 } catch (e: Exception) {
                     null
                 }
             }
 
+            myReviewsLastSyncTime = services.reviewRepository.myReviewsLastSync()
             myReviewsLoading = true
-            myReviews = attemptOrNull { services.reviewRepository.myReviews() } ?: myReviews
+            myReviews = if (online) {
+                attemptOrNull { services.reviewRepository.myReviews() }
+                    ?: services.reviewRepository.cachedMyReviews()
+            } else {
+                services.reviewRepository.cachedMyReviews()
+            }
+            myReviewsLastSyncTime = services.reviewRepository.myReviewsLastSync()
             myReviewsLoading = false
         }
     }
@@ -297,6 +308,47 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         reviews.clear()
         reviews.addAll(merged)
         attemptOrNull { localStore.saveReviews(merged) }
+    }
+
+    suspend fun refreshRestaurantReviews(restaurantId: String, force: Boolean = false) {
+        val fetched = attemptOrNull {
+            services.reviewRepository.revalidateAll(listOf(restaurantId), force)
+        }?.get(restaurantId)
+
+        if (fetched != null) {
+            val updated = reviews.filterNot { it.restaurantId == restaurantId } + fetched
+            reviews.clear()
+            reviews.addAll(updated)
+            attemptOrNull { localStore.saveReviews(updated) }
+        } else if (reviews.none { it.restaurantId == restaurantId }) {
+            // Fallback al cache si no hay informacion para este restaurante aun
+            val cached = attemptOrNull { localStore.loadReviews() }
+                .orEmpty()
+                .filter { it.restaurantId == restaurantId }
+            if (cached.isNotEmpty()) reviews.addAll(cached)
+        }
+    }
+
+    LaunchedEffect(overlay, selectedRestaurantId, online) {
+        val restaurantId = selectedRestaurantId ?: return@LaunchedEffect
+        if (overlay == Overlay.ReviewsList || overlay == Overlay.Detail) {
+            reviewsLastSyncTime = attemptOrNull {
+                services.documentCache.fetchedAt(CacheKeys.reviews(restaurantId))
+            }
+            if (online) {
+                refreshRestaurantReviews(restaurantId, force = true)
+                reviewsLastSyncTime = attemptOrNull {
+                    services.documentCache.fetchedAt(CacheKeys.reviews(restaurantId))
+                }
+            }
+        }
+    }
+
+    suspend fun refreshMyReviews(force: Boolean = false) {
+        attemptOrNull { services.reviewRepository.revalidateMyReviews(force) }?.let {
+            myReviews = it
+            myReviewsLastSyncTime = services.reviewRepository.myReviewsLastSync()
+        }
     }
 
     suspend fun refreshCrowding(force: Boolean = false) {
@@ -333,6 +385,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (OutboxKind.OCCUPANCY in result.sentKinds) refreshCrowding(force = true)
         if (OutboxKind.REVIEW in result.sentKinds) {
             refreshReviews(force = true)
+            refreshMyReviews(force = true)
             refreshRestaurants(force = true)
         }
         // Si algo quedo en cola, WorkManager lo termina en segundo plano con backoff aunque cierren la app
@@ -353,6 +406,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             flushOutbox()
             coroutineScope {
                 launch { refreshRestaurants(force) }
+                launch { refreshMyReviews(force) }
                 launch { refreshCatalog(force) }
             }
             coroutineScope {
@@ -388,26 +442,44 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     suspend fun loadRemote() {
         coroutineScope {
             launch {
-                services.profileSynchronizer.resolve(user.name)?.let {
-                    profile = it
+                val remoteProfile = services.profileSynchronizer.resolve(user.name)
+                if (remoteProfile != null) {
+                    profile = remoteProfile
                     surveyDone = true
+                } else {
+                    localStore.loadProfileRecord()?.let {
+                        profile = it.profile
+                        surveyDone = true
+                    }
                 }
                 profileResolved = true
             }
             launch {
                 refreshRestaurants()
+                if (!restaurantsReachable) {
+                    restaurants = applyRatingSummaries(
+                        services.restaurantRepository.cached(),
+                        services.reviewRepository.cachedSummaries()
+                    )
+                }
                 restaurantsResolved = true
             }
             launch {
                 refreshCatalog()
+                if (!catalogReachable) {
+                    catalog = services.catalogRepository.cached()
+                }
                 catalogResolved = true
             }
             launch {
                 if (services.connectivity.online.value) flushOutbox()
-                attemptOrNull { services.savedRepository.fetch() }?.let {
-                    val merged = applyPendingSaved(it)
+                val remoteSaved = attemptOrNull { services.savedRepository.fetch() }
+                if (remoteSaved != null) {
+                    val merged = applyPendingSaved(remoteSaved)
                     savedIds = merged
                     attemptOrNull { localStore.saveSavedIds(merged) }
+                } else {
+                    savedIds = applyPendingSaved(localStore.loadSavedIds())
                 }
             }
         }
@@ -415,8 +487,18 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         loadFailed = (restaurants.isEmpty() && !restaurantsReachable) || (catalog.isEmpty && !catalogReachable)
         if (loadFailed) return
         coroutineScope {
-            launch { refreshReviews() }
-            launch { refreshCrowding() }
+            launch {
+                refreshReviews()
+                if (reviews.isEmpty()) reviews.addAll(localStore.loadReviews())
+            }
+            launch {
+                refreshMyReviews()
+                if (myReviews.isEmpty()) myReviews = services.reviewRepository.cachedMyReviews()
+            }
+            launch {
+                refreshCrowding()
+                if (crowding.isEmpty()) crowding.putAll(localStore.loadCrowding())
+            }
         }
         startupDone = true
     }
@@ -441,22 +523,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         services.ensureDataOwner(user.id)
         savedHome = if (services.preferences.current.value.rememberHomeFilters) services.preferences.loadHomeFilters() else HomeFilterState()
         updatePending()
-        localStore.loadProfileRecord()?.let {
-            profile = it.profile
-            surveyDone = true
-        }
-        reviews.addAll(localStore.loadReviews())
-        crowding.putAll(localStore.loadCrowding())
-        savedIds = localStore.loadSavedIds()
         recentSearches = localStore.loadRecentSearches()
-        restaurants = applyRatingSummaries(
-            services.restaurantRepository.cached(),
-            services.reviewRepository.cachedSummaries()
-        )
-        catalog = services.catalogRepository.cached()
-        profileResolved = surveyDone
-        restaurantsResolved = restaurants.isNotEmpty()
-        catalogResolved = !catalog.isEmpty
         lastSyncTime = services.localStore.loadDocument(LocalStore.LAST_SYNC_KEY)?.fetchedAt
         loadRemote()
     }
@@ -707,6 +774,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                     overlay == Overlay.ReviewsList && restaurant != null -> ReviewsListView(
                         restaurant = restaurant,
                         reviews = restaurantReviews,
+                        isOnline = online,
+                        lastSyncTime = reviewsLastSyncTime ?: lastSyncTime,
                         onBack = ::popOverlay,
                         onWriteReview = {
                             popOverlay()
@@ -769,6 +838,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         MyReviewsView(
                             reviews = combinedMyReviews,
                             restaurantsById = restaurants.associateBy { it.id },
+                            isOnline = online,
+                            lastSyncTime = myReviewsLastSyncTime ?: lastSyncTime,
                             isLoading = myReviewsLoading && combinedMyReviews.isEmpty(),
                             onSelectRestaurant = ::openDetailFromRanking,
                             onBack = ::popOverlay
