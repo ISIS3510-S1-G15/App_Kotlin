@@ -63,6 +63,7 @@ import com.uniandes.campuseats.data.prefs.HomeFilterState
 import com.uniandes.campuseats.data.remote.appLevelFromRemote
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
+import com.uniandes.campuseats.data.cache.CacheKeys
 import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.rememberUserLocation
@@ -200,6 +201,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     // Fuente unica de verdad de conectividad (red con internet validado)
     val online by services.connectivity.online.collectAsStateWithLifecycle()
     var lastSyncTime by remember { mutableStateOf<Long?>(null) }
+    var reviewsLastSyncTime by remember { mutableStateOf<Long?>(null) }
 
     // Cambios hechos offline que aun no llegaron al servidor: se re-aplican encima de lo que baje de la red
     suspend fun pendingCrowding(): Map<String, List<Int>> =
@@ -320,10 +322,18 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         }
     }
 
-    LaunchedEffect(overlay, selectedRestaurantId) {
+    LaunchedEffect(overlay, selectedRestaurantId, online) {
         val restaurantId = selectedRestaurantId ?: return@LaunchedEffect
         if (overlay == Overlay.ReviewsList || overlay == Overlay.Detail) {
-            refreshRestaurantReviews(restaurantId, force = true)
+            reviewsLastSyncTime = attemptOrNull {
+                services.documentCache.fetchedAt(CacheKeys.reviews(restaurantId))
+            }
+            if (online) {
+                refreshRestaurantReviews(restaurantId, force = true)
+                reviewsLastSyncTime = attemptOrNull {
+                    services.documentCache.fetchedAt(CacheKeys.reviews(restaurantId))
+                }
+            }
         }
     }
 
@@ -756,6 +766,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                     overlay == Overlay.ReviewsList && restaurant != null -> ReviewsListView(
                         restaurant = restaurant,
                         reviews = restaurantReviews,
+                        isOnline = online,
+                        lastSyncTime = reviewsLastSyncTime ?: lastSyncTime,
                         onBack = ::popOverlay,
                         onWriteReview = {
                             popOverlay()
