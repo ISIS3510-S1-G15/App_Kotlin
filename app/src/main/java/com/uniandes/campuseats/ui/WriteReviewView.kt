@@ -32,6 +32,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,10 +50,15 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.Review
+import com.uniandes.campuseats.data.local.ReviewDraft
+import com.uniandes.campuseats.data.local.ReviewDraftStore
 import com.uniandes.campuseats.data.ReviewRatings
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -93,6 +100,48 @@ fun WriteReviewView(
 
     val allRated = ratings.values.all { it > 0 }
     val avgRating = if (allRated) String.format(Locale.US, "%.1f", ratings.values.average()) else "—"
+
+    val context = LocalContext.current
+    val draftStore = remember { ReviewDraftStore(context) }
+    val scope = rememberCoroutineScope()
+    var draftLoaded by remember(restaurant.id) { mutableStateOf(false) }
+    var draftRestored by remember(restaurant.id) { mutableStateOf(false) }
+
+    LaunchedEffect(restaurant.id) {
+        draftStore.load(restaurant.id)?.let { draft ->
+            ratings = mapOf(
+                "taste" to draft.taste,
+                "attention" to draft.attention,
+                "price" to draft.price,
+                "options" to draft.options
+            )
+            dietaryOptions = draft.dietaryOptions
+            comment = draft.comment
+            draftRestored = true
+        }
+        draftLoaded = true
+    }
+
+    LaunchedEffect(draftLoaded, ratings, dietaryOptions, comment, submitted) {
+        if (!draftLoaded || submitted) return@LaunchedEffect
+        delay(400)
+        val hasContent = ratings.values.any { it > 0 } || dietaryOptions.isNotEmpty() || comment.isNotBlank()
+        if (hasContent) {
+            draftStore.save(
+                restaurant.id,
+                ReviewDraft(
+                    taste = ratings["taste"] ?: 0,
+                    attention = ratings["attention"] ?: 0,
+                    price = ratings["price"] ?: 0,
+                    options = ratings["options"] ?: 0,
+                    dietaryOptions = dietaryOptions,
+                    comment = comment
+                )
+            )
+        } else {
+            draftStore.delete(restaurant.id)
+        }
+    }
 
     if (submitted) {
         SubmittedScreen(restaurantName = restaurant.name, avgRating = avgRating, queuedOffline = !isOnline, onBack = onBack)
@@ -139,6 +188,38 @@ fun WriteReviewView(
                 .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            if (draftRestored) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Orange)
+                        .border(1.dp, Outline, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Draft restored from device",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Discard",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            ratings = mapOf("taste" to 0, "attention" to 0, "price" to 0, "options" to 0)
+                            dietaryOptions = emptyList()
+                            comment = ""
+                            draftRestored = false
+                            scope.launch { draftStore.delete(restaurant.id) }
+                        }
+                    )
+                }
+            }
+
             Card {
                 CardTitle("Rate your experience", bottom = 16.dp)
                 Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -266,6 +347,8 @@ fun WriteReviewView(
                     .background(if (allRated) Orange else Outline)
                     .clickable(enabled = allRated) {
                         submitted = true
+                        // Esto borra el draft de la reseña
+                        scope.launch { draftStore.delete(restaurant.id) }
                         onSubmit(
                             Review(
                                 id = "r${System.currentTimeMillis()}",
