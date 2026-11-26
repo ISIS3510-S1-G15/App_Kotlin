@@ -92,6 +92,7 @@ import com.uniandes.campuseats.ui.RankingView
 import com.uniandes.campuseats.ui.MyReviewsView
 import com.uniandes.campuseats.ranking.RankingViewModel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -197,6 +198,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var startupDone by remember { mutableStateOf(false) }
     var loadFailed by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    var syncInFlight by remember { mutableStateOf(false) }
     var outboxPending by remember { mutableIntStateOf(0) }
     // Fuente unica de verdad de conectividad (red con internet validado)
     val online by services.connectivity.online.collectAsStateWithLifecycle()
@@ -398,10 +400,11 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (services.connectivity.online.value) flushOutbox() else services.syncScheduler.scheduleOutboxSync()
     }
 
-    suspend fun refreshStale(force: Boolean = false) {
+    suspend fun refreshStale(force: Boolean = false, showIndicator: Boolean = false) {
         // La guarda va ANTES del flush: antes un flush podia lanzar refreshes en paralelo a otro refresh en curso
-        if (refreshing) return
-        refreshing = true
+        if (syncInFlight) return
+        syncInFlight = true
+        if (showIndicator) refreshing = true
         try {
             flushOutbox()
             coroutineScope {
@@ -420,9 +423,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                 attemptOrNull { services.localStore.saveDocument(LocalStore.LAST_SYNC_KEY, "ok", now) }
                 lastSyncTime = now
             }
-
         } finally {
-            refreshing = false
+            syncInFlight = false
+            if (showIndicator) refreshing = false
         }
     }
 
@@ -430,6 +433,15 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     LaunchedEffect(windowInfo.isWindowFocused) {
         if (windowInfo.isWindowFocused && startupDone && services.connectivity.online.value) {
             scope.launch { refreshStale() }
+        }
+    }
+
+    // Periodic TTL watcher: runs only while the app is in the foreground and online
+    LaunchedEffect(online, startupDone, windowInfo.isWindowFocused) {
+        if (!online || !startupDone || !windowInfo.isWindowFocused) return@LaunchedEffect
+        while (true) {
+            delay(60_000L)
+            refreshStale(force = false)
         }
     }
 
@@ -896,7 +908,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             onRefresh = {
                                 // Para que sea mas informativo verificamos la conexion antes de forzar la recarga
                                 if (services.connectivity.online.value) {
-                                    scope.launch { refreshStale(force = true) }
+                                    scope.launch { refreshStale(force = true, showIndicator = true) }
                                 } else {
                                     Toast.makeText(
                                         context,
