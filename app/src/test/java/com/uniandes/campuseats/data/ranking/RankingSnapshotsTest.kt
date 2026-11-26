@@ -21,6 +21,7 @@ class RankingSnapshotsTest {
         assertEquals(4.5, result.items.first().score, 0.0)
         assertEquals(1234L, result.computedAt)
         assertTrue(result.fromSnapshot)
+        assertEquals(RankingSource.DISK, result.source)
     }
 
     @Test

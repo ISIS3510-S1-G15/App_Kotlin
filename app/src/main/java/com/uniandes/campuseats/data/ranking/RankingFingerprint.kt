@@ -7,22 +7,31 @@ object RankingFingerprint {
     fun of(inputs: RankingInputs, window: RankingWindow): Long {
         var hash = window.ordinal.toLong() + 1
         if (window == RankingWindow.MONTH) hash = mix(hash, inputs.windowCutoff.hashCode().toLong())
-        inputs.restaurants.forEach {
-            hash = mix(hash, it.id.hashCode().toLong())
-            hash = mix(hash, it.rating.hashCode().toLong())
-            hash = mix(hash, it.reviews.toLong())
+
+        val restaurants = inputs.restaurants
+        for (index in restaurants.indices) {
+            val restaurant = restaurants[index]
+            hash = mix(hash, restaurant.id.hashCode().toLong())
+            hash = mix(hash, restaurant.rating.hashCode().toLong())
+            hash = mix(hash, restaurant.reviews.toLong())
         }
-        inputs.reviews.forEach {
-            hash = mix(hash, it.id.hashCode().toLong())
-            hash = mix(hash, it.restaurantId.hashCode().toLong())
-            hash = mix(hash, it.date.hashCode().toLong())
-            hash = mix(hash, it.ratings.hashCode().toLong())
+
+        val reviews = inputs.reviews
+        for (index in reviews.indices) {
+            val review = reviews[index]
+            hash = mix(hash, review.id.hashCode().toLong())
+            hash = mix(hash, review.restaurantId.hashCode().toLong())
+            hash = mix(hash, review.date.hashCode().toLong())
+            hash = mix(hash, review.ratings.hashCode().toLong())
         }
-        inputs.crowding.toSortedMap().forEach { (id, levels) ->
-            hash = mix(hash, id.hashCode().toLong())
-            hash = mix(hash, levels.hashCode().toLong())
+
+        var crowdingHash = 0L
+        for ((id, levels) in inputs.crowding) {
+            var entryHash = id.hashCode().toLong()
+            for (index in levels.indices) entryHash = mix(entryHash, levels[index].toLong())
+            crowdingHash += entryHash
         }
-        return hash
+        return mix(hash, crowdingHash)
     }
 
     private fun mix(hash: Long, value: Long): Long = hash * PRIME + value
