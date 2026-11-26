@@ -301,6 +301,32 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         attemptOrNull { localStore.saveReviews(merged) }
     }
 
+    suspend fun refreshRestaurantReviews(restaurantId: String, force: Boolean = false) {
+        val fetched = attemptOrNull {
+            services.reviewRepository.revalidateAll(listOf(restaurantId), force)
+        }?.get(restaurantId)
+
+        if (fetched != null) {
+            val updated = reviews.filterNot { it.restaurantId == restaurantId } + fetched
+            reviews.clear()
+            reviews.addAll(updated)
+            attemptOrNull { localStore.saveReviews(updated) }
+        } else if (reviews.none { it.restaurantId == restaurantId }) {
+            // Fallback al cache si no hay informacion para este restaurante aun
+            val cached = attemptOrNull { localStore.loadReviews() }
+                .orEmpty()
+                .filter { it.restaurantId == restaurantId }
+            if (cached.isNotEmpty()) reviews.addAll(cached)
+        }
+    }
+
+    LaunchedEffect(overlay, selectedRestaurantId) {
+        val restaurantId = selectedRestaurantId ?: return@LaunchedEffect
+        if (overlay == Overlay.ReviewsList || overlay == Overlay.Detail) {
+            refreshRestaurantReviews(restaurantId, force = true)
+        }
+    }
+
     suspend fun refreshMyReviews(force: Boolean = false) {
         attemptOrNull { services.reviewRepository.revalidateMyReviews(force) }?.let {
             myReviews = it
