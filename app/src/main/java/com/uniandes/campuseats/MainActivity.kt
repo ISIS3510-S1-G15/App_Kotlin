@@ -267,7 +267,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             }
 
             myReviewsLoading = true
-            myReviews = attemptOrNull { services.reviewRepository.myReviews() } ?: myReviews
+            // Ahora se sigue una aproximacion Network first fallback to cache
+            myReviews = attemptOrNull { services.reviewRepository.myReviews() }
+                ?: services.reviewRepository.cachedMyReviews()
             myReviewsLoading = false
         }
     }
@@ -297,6 +299,12 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         reviews.clear()
         reviews.addAll(merged)
         attemptOrNull { localStore.saveReviews(merged) }
+    }
+
+    suspend fun refreshMyReviews(force: Boolean = false) {
+        attemptOrNull { services.reviewRepository.revalidateMyReviews(force) }?.let {
+            myReviews = it
+        }
     }
 
     suspend fun refreshCrowding(force: Boolean = false) {
@@ -333,6 +341,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (OutboxKind.OCCUPANCY in result.sentKinds) refreshCrowding(force = true)
         if (OutboxKind.REVIEW in result.sentKinds) {
             refreshReviews(force = true)
+            refreshMyReviews(force = true)
             refreshRestaurants(force = true)
         }
         // Si algo quedo en cola, WorkManager lo termina en segundo plano con backoff aunque cierren la app
@@ -353,6 +362,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             flushOutbox()
             coroutineScope {
                 launch { refreshRestaurants(force) }
+                launch { refreshMyReviews(force) }
                 launch { refreshCatalog(force) }
             }
             coroutineScope {
@@ -416,6 +426,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (loadFailed) return
         coroutineScope {
             launch { refreshReviews() }
+            launch { refreshMyReviews() }
             launch { refreshCrowding() }
         }
         startupDone = true
