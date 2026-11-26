@@ -398,26 +398,44 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     suspend fun loadRemote() {
         coroutineScope {
             launch {
-                services.profileSynchronizer.resolve(user.name)?.let {
-                    profile = it
+                val remoteProfile = services.profileSynchronizer.resolve(user.name)
+                if (remoteProfile != null) {
+                    profile = remoteProfile
                     surveyDone = true
+                } else {
+                    localStore.loadProfileRecord()?.let {
+                        profile = it.profile
+                        surveyDone = true
+                    }
                 }
                 profileResolved = true
             }
             launch {
                 refreshRestaurants()
+                if (!restaurantsReachable) {
+                    restaurants = applyRatingSummaries(
+                        services.restaurantRepository.cached(),
+                        services.reviewRepository.cachedSummaries()
+                    )
+                }
                 restaurantsResolved = true
             }
             launch {
                 refreshCatalog()
+                if (!catalogReachable) {
+                    catalog = services.catalogRepository.cached()
+                }
                 catalogResolved = true
             }
             launch {
                 if (services.connectivity.online.value) flushOutbox()
-                attemptOrNull { services.savedRepository.fetch() }?.let {
-                    val merged = applyPendingSaved(it)
+                val remoteSaved = attemptOrNull { services.savedRepository.fetch() }
+                if (remoteSaved != null) {
+                    val merged = applyPendingSaved(remoteSaved)
                     savedIds = merged
                     attemptOrNull { localStore.saveSavedIds(merged) }
+                } else {
+                    savedIds = applyPendingSaved(localStore.loadSavedIds())
                 }
             }
         }
@@ -425,9 +443,18 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         loadFailed = (restaurants.isEmpty() && !restaurantsReachable) || (catalog.isEmpty && !catalogReachable)
         if (loadFailed) return
         coroutineScope {
-            launch { refreshReviews() }
-            launch { refreshMyReviews() }
-            launch { refreshCrowding() }
+            launch {
+                refreshReviews()
+                if (reviews.isEmpty()) reviews.addAll(localStore.loadReviews())
+            }
+            launch {
+                refreshMyReviews()
+                if (myReviews.isEmpty()) myReviews = services.reviewRepository.cachedMyReviews()
+            }
+            launch {
+                refreshCrowding()
+                if (crowding.isEmpty()) crowding.putAll(localStore.loadCrowding())
+            }
         }
         startupDone = true
     }
@@ -452,22 +479,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         services.ensureDataOwner(user.id)
         savedHome = if (services.preferences.current.value.rememberHomeFilters) services.preferences.loadHomeFilters() else HomeFilterState()
         updatePending()
-        localStore.loadProfileRecord()?.let {
-            profile = it.profile
-            surveyDone = true
-        }
-        reviews.addAll(localStore.loadReviews())
-        crowding.putAll(localStore.loadCrowding())
-        savedIds = localStore.loadSavedIds()
         recentSearches = localStore.loadRecentSearches()
-        restaurants = applyRatingSummaries(
-            services.restaurantRepository.cached(),
-            services.reviewRepository.cachedSummaries()
-        )
-        catalog = services.catalogRepository.cached()
-        profileResolved = surveyDone
-        restaurantsResolved = restaurants.isNotEmpty()
-        catalogResolved = !catalog.isEmpty
         lastSyncTime = services.localStore.loadDocument(LocalStore.LAST_SYNC_KEY)?.fetchedAt
         loadRemote()
     }
