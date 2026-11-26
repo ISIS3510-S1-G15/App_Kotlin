@@ -16,6 +16,7 @@ import com.uniandes.campuseats.data.local.AppDatabase
 import com.uniandes.campuseats.data.local.LegacyPreferencesMigration
 import com.uniandes.campuseats.data.local.LocalStore
 import com.uniandes.campuseats.data.local.RoomDocumentCache
+import com.uniandes.campuseats.data.local.ReviewDraftStore
 import com.uniandes.campuseats.data.outbox.OutboxFlusher
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
@@ -62,6 +63,7 @@ class AppServices private constructor(val appContext: Context) {
     // ---- almacenamiento ----
     val sessionStore = SessionStore(appContext)
     val localStore = LocalStore(AppDatabase.create(appContext))
+    val reviewDraftStore = ReviewDraftStore(appContext)
 
     // ---- cache: L1 memoria (objetos y documentos) delante de L2 disco (Room) ----
     private val initialEntries = preferences.current.value.memoryCacheEntries
@@ -154,6 +156,7 @@ class AppServices private constructor(val appContext: Context) {
         val owner = localStore.loadDocument(LocalStore.DATA_OWNER_KEY)?.payload
         if (owner != null && owner != userId.toString()) {
             localStore.clearUserData()
+            attemptOrNull { reviewDraftStore.clearAll() }
             clearMemoryCaches()
         }
         localStore.saveDocument(LocalStore.DATA_OWNER_KEY, userId.toString(), System.currentTimeMillis())
@@ -170,6 +173,8 @@ class AppServices private constructor(val appContext: Context) {
         }
         attemptOrNull { localStore.clearUserData() }
         attemptOrNull { preferences.clearHomeFilters() }
+        // Agregado para que los borradores de las reseñas se borren tambien al cerrar sesion
+        attemptOrNull { reviewDraftStore.clearAll() }
         clearMemoryCaches()
         syncScheduler.cancelAll()
         _sessionExpired.value = false
