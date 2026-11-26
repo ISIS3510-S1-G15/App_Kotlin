@@ -9,6 +9,7 @@ import com.uniandes.campuseats.AppServices
 import com.uniandes.campuseats.data.ranking.RankedRestaurant
 import com.uniandes.campuseats.data.ranking.RankingCriterion
 import com.uniandes.campuseats.data.ranking.RankingRepository
+import com.uniandes.campuseats.data.ranking.RankingSource
 import com.uniandes.campuseats.data.ranking.RankingWindow
 import com.uniandes.campuseats.net.ConnectivityMonitor
 import kotlinx.coroutines.Job
@@ -28,6 +29,7 @@ data class RankingUiState(
     val online: Boolean = true,
     val lastUpdated: Long? = null,
     val fromSnapshot: Boolean = false,
+    val source: RankingSource = RankingSource.LOCAL,
     val refreshQueued: Boolean = false
 )
 
@@ -85,12 +87,18 @@ class RankingViewModel(
         job = viewModelScope.launch {
             repository.snapshot(current.criterion, current.window)?.let { stored ->
                 _state.update {
-                    it.copy(items = stored.items, loading = false, lastUpdated = stored.computedAt, fromSnapshot = true)
+                    it.copy(items = stored.items, loading = false, lastUpdated = stored.computedAt, fromSnapshot = true, source = stored.source)
                 }
             }
             val local = repository.load(current.criterion, current.window, refresh = false)
             _state.update {
-                it.copy(items = local.items, loading = false, lastUpdated = repository.lastRefreshAt() ?: local.computedAt, fromSnapshot = false)
+                it.copy(
+                    items = local.items,
+                    loading = false,
+                    lastUpdated = repository.lastRefreshAt() ?: local.computedAt,
+                    fromSnapshot = false,
+                    source = local.source
+                )
             }
             if (_state.value.online && repository.isStale()) load(refresh = true)
         }
@@ -107,7 +115,8 @@ class RankingViewModel(
                     items = result.items,
                     loading = false,
                     lastUpdated = repository.lastRefreshAt() ?: result.computedAt,
-                    fromSnapshot = false
+                    fromSnapshot = false,
+                    source = result.source
                 )
             }
         }

@@ -30,7 +30,7 @@ class RankingCacheTest {
 
     @Test
     fun hitWhenFingerprintMatches() {
-        val cache = RankingCache()
+        val cache = RankingCache(MapBacking())
         val stored = result(RankingCriterion.TASTE)
         cache.put(stored, 42L)
         assertSame(stored, cache.get(RankingCriterion.TASTE, RankingWindow.ALL_TIME, 42L))
@@ -40,7 +40,7 @@ class RankingCacheTest {
 
     @Test
     fun missWhenFingerprintChanges() {
-        val cache = RankingCache()
+        val cache = RankingCache(MapBacking())
         cache.put(result(RankingCriterion.TASTE), 42L)
         assertNull(cache.get(RankingCriterion.TASTE, RankingWindow.ALL_TIME, 43L))
         assertEquals(1, cache.misses)
@@ -48,7 +48,7 @@ class RankingCacheTest {
 
     @Test
     fun missForOtherCriterionOrWindow() {
-        val cache = RankingCache()
+        val cache = RankingCache(MapBacking())
         cache.put(result(RankingCriterion.TASTE), 42L)
         assertNull(cache.get(RankingCriterion.VALUE, RankingWindow.ALL_TIME, 42L))
         assertNull(cache.get(RankingCriterion.TASTE, RankingWindow.MONTH, 42L))
@@ -56,7 +56,7 @@ class RankingCacheTest {
 
     @Test
     fun putAllStoresEveryCriterion() {
-        val cache = RankingCache()
+        val cache = RankingCache(MapBacking())
         cache.putAll(RankingCriterion.entries.map { result(it) }, 7L)
         RankingCriterion.entries.forEach {
             assertNotNull(cache.get(it, RankingWindow.ALL_TIME, 7L))
@@ -65,7 +65,7 @@ class RankingCacheTest {
 
     @Test
     fun leastRecentlyUsedEntryIsEvicted() {
-        val cache = RankingCache(maxEntries = 2)
+        val cache = RankingCache(MapBacking(2))
         cache.put(result(RankingCriterion.TASTE), 1L)
         cache.put(result(RankingCriterion.VALUE), 1L)
         cache.get(RankingCriterion.TASTE, RankingWindow.ALL_TIME, 1L)
@@ -76,7 +76,7 @@ class RankingCacheTest {
 
     @Test
     fun clearEmptiesTheCache() {
-        val cache = RankingCache()
+        val cache = RankingCache(MapBacking())
         cache.put(result(RankingCriterion.TASTE), 1L)
         cache.clear()
         assertEquals(0, cache.size())
@@ -84,10 +84,25 @@ class RankingCacheTest {
 
     @Test
     fun trimKeepsOnlyTheRequestedFraction() {
-        val cache = RankingCache()
+        val cache = RankingCache(MapBacking())
         cache.putAll(RankingCriterion.entries.map { result(it) }, 1L)
         cache.trim(0.4f)
         assertEquals(2, cache.size())
+    }
+
+    @Test
+    fun estimatedSizeGrowsWithRowsAndNeverDropsBelowOneKilobyte() {
+        val empty = result(RankingCriterion.TASTE)
+        assertEquals(1, RankingCache.estimateKilobytes(empty))
+        val rows = (0 until 100).map { RankedRestaurant(it + 1, restaurants.first(), 4.0, 1, null) }
+        val big = empty.copy(items = rows)
+        assertEquals(true, RankingCache.estimateKilobytes(big) > RankingCache.estimateKilobytes(empty))
+    }
+
+    @Test
+    fun deviceCacheSizeIsBoundedByTheConfiguredCeiling() {
+        val kilobytes = RankingCache.deviceCacheKilobytes()
+        assertEquals(true, kilobytes in RankingCache.DEFAULT_ENTRIES..4096)
     }
 
     @Test

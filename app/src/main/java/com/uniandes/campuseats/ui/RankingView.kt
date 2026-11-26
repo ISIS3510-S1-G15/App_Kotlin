@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,9 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.uniandes.campuseats.BuildConfig
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.ranking.RankedRestaurant
 import com.uniandes.campuseats.data.ranking.RankingCriterion
+import com.uniandes.campuseats.data.ranking.RankingSource
 import com.uniandes.campuseats.data.ranking.RankingWindow
 import com.uniandes.campuseats.ranking.RankingUiState
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
@@ -56,7 +59,19 @@ private val Down = Color(0xFFD64545)
 private val Gold = Color(0xFFE0A526)
 private val Silver = Color(0xFF9AA0A6)
 private val Bronze = Color(0xFFB87333)
+private val SourceDisk = Color(0xFF2F80ED)
 private const val MAX_SCORE = 5f
+private val PillShape = RoundedCornerShape(50)
+private val RowShape = RoundedCornerShape(16.dp)
+private val ThumbnailShape = RoundedCornerShape(12.dp)
+private val ThumbnailSize = 52.dp
+
+private fun sourceColor(source: RankingSource): Color = when (source) {
+    RankingSource.MEMORY -> Up
+    RankingSource.DISK -> SourceDisk
+    RankingSource.NETWORK -> Down
+    RankingSource.LOCAL -> Muted
+}
 
 @Composable
 fun RankingView(
@@ -108,7 +123,8 @@ fun RankingView(
             }
         }
 
-        val updatedAt = state.lastUpdated?.let { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it)) }
+        val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+        val updatedAt = remember(state.lastUpdated) { state.lastUpdated?.let { timeFormat.format(Date(it)) } }
         val status = when {
             state.refreshQueued -> "Refresh queued · it will update when you're back online"
             !state.online -> "Offline · showing saved ranking" + (updatedAt?.let { " from $it" } ?: "")
@@ -116,13 +132,26 @@ fun RankingView(
             else -> null
         }
         status?.let {
-            Text(
-                text = it,
-                color = if (state.refreshQueued || !state.online) Orange else Muted,
-                fontSize = 12.sp,
-                fontWeight = if (state.refreshQueued || !state.online) FontWeight.SemiBold else FontWeight.Normal,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-            )
+            ) {
+                if (BuildConfig.DEBUG) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(sourceColor(state.source))
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    text = it,
+                    color = if (state.refreshQueued || !state.online) Orange else Muted,
+                    fontSize = 12.sp,
+                    fontWeight = if (state.refreshQueued || !state.online) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
@@ -173,9 +202,9 @@ private fun RoundIconButton(onClick: () -> Unit, content: @Composable () -> Unit
 private fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(PillShape)
             .background(if (selected) Orange else Color.White)
-            .border(1.dp, if (selected) Orange else Outline, RoundedCornerShape(50))
+            .border(1.dp, if (selected) Orange else Outline, PillShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
@@ -191,12 +220,17 @@ private fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun RankingRow(item: RankedRestaurant, onClick: () -> Unit) {
+    val details = remember(item.score, item.reviewCount, item.isFallback) {
+        val label = if (item.reviewCount == 1) "rating" else "ratings"
+        val stale = if (item.isFallback) " · none this month" else ""
+        "${String.format(Locale.US, "%.2f", item.score)} · ${item.reviewCount} $label$stale"
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RowShape)
             .background(Color.White)
-            .border(1.dp, Outline, RoundedCornerShape(16.dp))
+            .border(1.dp, Outline, RowShape)
             .clickable(onClick = onClick)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -207,8 +241,9 @@ private fun RankingRow(item: RankedRestaurant, onClick: () -> Unit) {
             model = item.restaurant.image,
             contentDescription = item.restaurant.name,
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .size(ThumbnailSize)
+                .clip(ThumbnailShape),
+            thumbnailSize = ThumbnailSize
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -229,11 +264,11 @@ private fun RankingRow(item: RankedRestaurant, onClick: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(5.dp)
-                    .clip(RoundedCornerShape(50))
+                    .clip(PillShape)
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "${String.format(Locale.US, "%.2f", item.score)} · ${item.reviewCount} ${if (item.reviewCount == 1) "rating" else "ratings"}${if (item.isFallback) " · none this month" else ""}",
+                text = details,
                 color = Muted,
                 fontSize = 12.sp
             )

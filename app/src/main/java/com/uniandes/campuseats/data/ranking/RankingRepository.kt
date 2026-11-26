@@ -9,9 +9,7 @@ import com.uniandes.campuseats.data.remote.RestaurantRepository
 import com.uniandes.campuseats.data.remote.ReviewRepository
 import com.uniandes.campuseats.data.remote.applyRatingSummaries
 import com.uniandes.campuseats.net.attemptOrNull
-import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -41,7 +39,7 @@ class RankingRepository(
 
     suspend fun load(criterion: RankingCriterion, window: RankingWindow, refresh: Boolean): RankingResult {
         val startedAt = System.nanoTime()
-        if (refresh) refreshSources()
+        val reachedServer = if (refresh) refreshSources() else false
         val refreshedAt = System.nanoTime()
         val inputs = gatherInputs()
         val fingerprint = RankingFingerprint.of(inputs, window)
@@ -50,16 +48,17 @@ class RankingRepository(
         cache.get(criterion, window, fingerprint)?.let { cached ->
             Log.d(
                 TAG,
-                "cache=HIT inputs=${millis(gatheredAt - refreshedAt)}ms hits=${cache.hits} misses=${cache.misses} entries=${cache.size()}"
+                "source=MEMORY inputs=${millis(gatheredAt - refreshedAt)}ms hits=${cache.hits} misses=${cache.misses}"
             )
-            return cached
+            return cached.copy(source = RankingSource.MEMORY)
         }
 
-        val results = computeAndStore(inputs, window, fingerprint)
+        val source = if (reachedServer) RankingSource.NETWORK else RankingSource.LOCAL
+        val results = computeAndStore(inputs, window, fingerprint, source)
         val computedAt = System.nanoTime()
         Log.d(
             TAG,
-            "cache=MISS refresh=${millis(refreshedAt - startedAt)}ms inputs=${millis(gatheredAt - refreshedAt)}ms " +
+            "source=$source refresh=${millis(refreshedAt - startedAt)}ms inputs=${millis(gatheredAt - refreshedAt)}ms " +
                 "compute=${millis(computedAt - gatheredAt)}ms hits=${cache.hits} misses=${cache.misses} " +
                 "restaurants=${inputs.restaurants.size} reviews=${inputs.reviews.size}"
         )
@@ -70,17 +69,25 @@ class RankingRepository(
         if (!refreshSources()) return false
         val inputs = gatherInputs()
         RankingWindow.entries.forEach { window ->
-            computeAndStore(inputs, window, RankingFingerprint.of(inputs, window))
+            computeAndStore(inputs, window, RankingFingerprint.of(inputs, window), RankingSource.NETWORK)
         }
         Log.d(TAG, "background refresh done restaurants=${inputs.restaurants.size} reviews=${inputs.reviews.size}")
         return true
     }
 
-    private suspend fun computeAndStore(inputs: RankingInputs, window: RankingWindow, fingerprint: Long): List<RankingResult> {
+    private suspend fun computeAndStore(
+        inputs: RankingInputs,
+        window: RankingWindow,
+        fingerprint: Long,
+        source: RankingSource
+    ): List<RankingResult> {
         val all = RankingEngine.computeAll(inputs, window)
         val now = clock()
-        val results = withMovement(window, all, now)
-            .map { (key, items) -> RankingResult(key, window, items, now, fromSnapshot = false) }
+        val moved = withMovement(window, all, now)
+        val results = ArrayList<RankingResult>(moved.size)
+        for ((criterion, items) in moved) {
+            results.add(RankingResult(criterion, window, items, now, fromSnapshot = false, source = source))
+        }
         cache.putAll(results, fingerprint)
         return results
     }
@@ -148,7 +155,15 @@ class RankingRepository(
             timeInMillis = clock()
             add(Calendar.DAY_OF_YEAR, -WINDOW_DAYS)
         }
-        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
+        val month = calendar.get(Calendar.MONTH) + 1
+        val day = calendar.get(Calendar.DAY_OF_MONTH)
+        return StringBuilder(DATE_LENGTH)
+            .append(calendar.get(Calendar.YEAR))
+            .append('-')
+            .append(if (month < 10) "0" else "").append(month)
+            .append('-')
+            .append(if (day < 10) "0" else "").append(day)
+            .toString()
     }
 
     private fun millis(nanos: Long) = nanos / NANOS_PER_MILLI
@@ -157,6 +172,7 @@ class RankingRepository(
         const val TAG = "Ranking"
         const val REFRESH_KEY = "ranking_last_refresh"
         const val WINDOW_DAYS = 30
+        const val DATE_LENGTH = 10
         const val NANOS_PER_MILLI = 1_000_000L
     }
 }

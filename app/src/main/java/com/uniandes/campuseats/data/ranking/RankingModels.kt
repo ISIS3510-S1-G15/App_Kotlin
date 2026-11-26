@@ -25,12 +25,15 @@ data class RankedRestaurant(
     val isFallback: Boolean = false
 )
 
+enum class RankingSource { MEMORY, DISK, NETWORK, LOCAL }
+
 data class RankingResult(
     val criterion: RankingCriterion,
     val window: RankingWindow,
     val items: List<RankedRestaurant>,
     val computedAt: Long,
-    val fromSnapshot: Boolean
+    val fromSnapshot: Boolean,
+    val source: RankingSource = RankingSource.LOCAL
 )
 
 data class RankingInputs(
