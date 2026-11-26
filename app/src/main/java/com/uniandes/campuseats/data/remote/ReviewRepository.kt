@@ -131,6 +131,10 @@ class ReviewRepository(
         return if (fresh) null else myReviews()
     }
 
+    suspend fun myReviewsLastSync(): Long? = attemptOrNull {
+        cache.fetchedAt(MY_REVIEWS_CACHE_KEY)
+    }
+
     suspend fun clearMyReviewsCache() {
         memory?.invalidate(MY_REVIEWS_CACHE_KEY)
         attemptOrNull { cache.clear(MY_REVIEWS_CACHE_KEY) }

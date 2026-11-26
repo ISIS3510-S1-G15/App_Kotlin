@@ -202,6 +202,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     val online by services.connectivity.online.collectAsStateWithLifecycle()
     var lastSyncTime by remember { mutableStateOf<Long?>(null) }
     var reviewsLastSyncTime by remember { mutableStateOf<Long?>(null) }
+    var myReviewsLastSyncTime by remember { mutableStateOf<Long?>(null) }
 
     // Cambios hechos offline que aun no llegaron al servidor: se re-aplican encima de lo que baje de la red
     suspend fun pendingCrowding(): Map<String, List<Int>> =
@@ -232,7 +233,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         outboxPending = queued + profilePending
     }
 
-    LaunchedEffect(overlay, outboxPending) {
+    LaunchedEffect(overlay, outboxPending, online) {
         if (overlay == Overlay.MyReviews) {
             // Lee las reseñas que estan guardadas en el Room
             val entries = attemptOrNull { services.localStore.pending() }.orEmpty()
@@ -263,15 +264,21 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         dietaryOptions = dietaryOptions,
                         comment = (body["comment"] as? String).orEmpty()
                     )
+
                 } catch (e: Exception) {
                     null
                 }
             }
 
+            myReviewsLastSyncTime = services.reviewRepository.myReviewsLastSync()
             myReviewsLoading = true
-            // Ahora se sigue una aproximacion Network first fallback to cache
-            myReviews = attemptOrNull { services.reviewRepository.myReviews() }
-                ?: services.reviewRepository.cachedMyReviews()
+            myReviews = if (online) {
+                attemptOrNull { services.reviewRepository.myReviews() }
+                    ?: services.reviewRepository.cachedMyReviews()
+            } else {
+                services.reviewRepository.cachedMyReviews()
+            }
+            myReviewsLastSyncTime = services.reviewRepository.myReviewsLastSync()
             myReviewsLoading = false
         }
     }
@@ -340,6 +347,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     suspend fun refreshMyReviews(force: Boolean = false) {
         attemptOrNull { services.reviewRepository.revalidateMyReviews(force) }?.let {
             myReviews = it
+            myReviewsLastSyncTime = services.reviewRepository.myReviewsLastSync()
         }
     }
 
@@ -830,6 +838,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         MyReviewsView(
                             reviews = combinedMyReviews,
                             restaurantsById = restaurants.associateBy { it.id },
+                            isOnline = online,
+                            lastSyncTime = myReviewsLastSyncTime ?: lastSyncTime,
                             isLoading = myReviewsLoading && combinedMyReviews.isEmpty(),
                             onSelectRestaurant = ::openDetailFromRanking,
                             onBack = ::popOverlay
