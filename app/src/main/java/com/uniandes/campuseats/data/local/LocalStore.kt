@@ -93,13 +93,14 @@ class LocalStore(
             dao.deleteDocumentsWithPrefix(CacheKeys.PARTNER_REPORT_PREFIX)
             dao.deleteDocument(LAST_SYNC_KEY)
             dao.deleteDocument(DATA_OWNER_KEY)
+            dao.deleteDocument(RECENT_VIEWS_KEY)
         }
     }
 
     /** Solo el cache de lectura (documentos); no toca datos del usuario ni la cola de salida. */
     suspend fun clearCachedDocuments() {
         database.withTransaction {
-            dao.deleteDocumentsExcept(listOf(DATA_OWNER_KEY, LAST_SYNC_KEY))
+            dao.deleteDocumentsExcept(listOf(DATA_OWNER_KEY, LAST_SYNC_KEY, RECENT_VIEWS_KEY))
             dao.clearRankingSnapshots()
         }
     }
@@ -189,6 +190,7 @@ class LocalStore(
         /** Documento que guarda el id del usuario dueño de los datos locales (evita mezclar cuentas). */
         const val DATA_OWNER_KEY = "data_owner"
         const val LAST_SYNC_KEY = "last_sync"
+        const val RECENT_VIEWS_KEY = "recent_views"
         const val CURRENT_RANKING = 0
         const val PREVIOUS_RANKING = 1
     }

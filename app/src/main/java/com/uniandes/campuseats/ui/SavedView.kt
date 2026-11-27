@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,6 +61,8 @@ private val GreenBg = Color(0xFFE8F5EB)
 private val ClosedBg = Color(0xFFF0EEEC)
 private val StarColor = Color(0xFFF4A735)
 private val Disabled = Color(0xFFB8AC9E)
+private val OpenGreen = Color(0xFF1E9E2F)
+private const val RECENT_PREVIEW_LIMIT = 8
 
 private const val PLUS_PATH = "M12 5V19M5 12H19"
 private const val BOOKMARK_PATH = "M5 3H19C19.6 3 20 3.4 20 4V21L12 17L4 21V4C4 3.4 4.4 3 5 3Z"
@@ -104,7 +107,9 @@ fun SavedView(
     onSelect: (Restaurant) -> Unit,
     crowding: Map<String, List<Int>>,
     savedIds: Set<String>,
-    userLocation: Location?
+    userLocation: Location?,
+    recentlyViewed: List<RecentlyViewedEntry> = emptyList(),
+    onSeeAllRecent: () -> Unit = {}
 ) {
     val restaurants = LocalRestaurants.current
     val dietaryOptions = LocalCatalog.current.labels("saved_dietary_filters")
@@ -323,90 +328,136 @@ fun SavedView(
             }
         }
 
-        Column(
+        RecentlyViewedSection(
+            entries = recentlyViewed,
+            onSelect = onSelect,
+            onSeeAll = onSeeAllRecent
+        )
+    }
+}
+
+@Composable
+private fun RecentlyViewedSection(
+    entries: List<RecentlyViewedEntry>,
+    onSelect: (Restaurant) -> Unit,
+    onSeeAll: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "Recently Viewed",
-                fontSize = 15.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = Ink,
-                fontFamily = OutfitFontFamily,
-                modifier = Modifier.padding(bottom = 12.dp)
+                fontFamily = OutfitFontFamily
             )
+            Text(
+                text = "See all",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onSeeAll)
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            )
+        }
+        if (entries.isEmpty()) {
+            Text(
+                text = "Restaurants you open will appear here",
+                fontSize = 12.sp,
+                color = Muted,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
                     .padding(bottom = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                restaurants.filter { it.id !in savedIds }.take(4).forEach { r ->
-                    val shape = RoundedCornerShape(16.dp)
-                    Column(
-                        modifier = Modifier
-                            .width(120.dp)
-                            .shadow(1.dp, shape)
-                            .clip(shape)
-                            .background(Color.White)
-                            .border(1.dp, CardBorder, shape)
-                            .clickable { onSelect(r) }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(80.dp)
-                        ) {
-                            RestaurantImage(
-                                model = r.image,
-                                contentDescription = r.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f))
-                                        )
-                                    )
-                            )
-                            Text(
-                                text = if (r.isOpen) "Open" else "Closed",
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (r.isOpen) Green else Color.Black.copy(alpha = 0.5f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text(
-                                text = r.name,
-                                fontSize = 11.sp,
-                                lineHeight = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Ink,
-                                fontFamily = OutfitFontFamily
-                            )
-                            Row(
-                                modifier = Modifier.padding(top = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                PathIcon(STAR_PATH, 8.dp, fill = StarColor)
-                                Text(text = "${r.rating}", fontSize = 10.sp, color = Muted)
-                            }
-                        }
-                    }
+                entries.take(RECENT_PREVIEW_LIMIT).forEach { entry ->
+                    RecentPreviewCard(entry.restaurant, onSelect)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentPreviewCard(r: Restaurant, onSelect: (Restaurant) -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier = Modifier
+            .width(150.dp)
+            .shadow(1.dp, shape)
+            .clip(shape)
+            .background(Color.White)
+            .border(1.dp, CardBorder, shape)
+            .clickable { onSelect(r) }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(100.dp)
+        ) {
+            RestaurantImage(
+                model = r.image,
+                contentDescription = r.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.25f))
+                        )
+                    )
+            )
+            Text(
+                text = if (r.isOpen) "Open" else "Closed",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .clip(CircleShape)
+                    .background(if (r.isOpen) OpenGreen else Color.Black.copy(alpha = 0.6f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(
+                text = r.name,
+                fontSize = 14.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink,
+                fontFamily = OutfitFontFamily,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                PathIcon(STAR_PATH, 10.dp, fill = Accent)
+                Text(text = "${r.rating}", fontSize = 12.sp, color = Muted)
             }
         }
     }

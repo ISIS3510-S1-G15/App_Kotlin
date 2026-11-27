@@ -90,6 +90,9 @@ import com.uniandes.campuseats.ui.WriteReviewView
 import com.uniandes.campuseats.ui.PartnerReportView
 import com.uniandes.campuseats.ui.RankingView
 import com.uniandes.campuseats.ui.MyReviewsView
+import com.uniandes.campuseats.ui.RecentlyViewedView
+import com.uniandes.campuseats.ui.resolveRecentlyViewed
+import com.uniandes.campuseats.data.remote.RecentView
 import com.uniandes.campuseats.ranking.RankingViewModel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -107,7 +110,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings, Ranking, MyReviews }
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings, Ranking, MyReviews, RecentlyViewed }
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
@@ -192,6 +195,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var restaurantsReachable by remember { mutableStateOf(false) }
     var catalogReachable by remember { mutableStateOf(false) }
     var recentSearches by remember { mutableStateOf(emptyList<String>()) }
+    var recentViews by remember { mutableStateOf(emptyList<RecentView>()) }
+    var recentViewsUpdatedAt by remember { mutableStateOf<Long?>(null) }
     var catalog by remember { mutableStateOf(Catalog.Empty) }
     var catalogResolved by remember { mutableStateOf(false) }
 
@@ -394,6 +399,16 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (result.remaining > 0) services.syncScheduler.scheduleOutboxSync()
     }
 
+    suspend fun refreshRecentViews() {
+        if (!services.connectivity.online.value) return
+        val pending = attemptOrNull { localStore.pending() }.orEmpty()
+            .filter { it.request.kind == OutboxKind.ANALYTICS }
+        attemptOrNull { services.recentViewsRepository.fetch(pending) }?.let {
+            recentViews = it.items
+            recentViewsUpdatedAt = it.updatedAt
+        }
+    }
+
     suspend fun enqueueAndFlush(request: OutboxRequest) {
         services.outboxStore.enqueue(request)
         updatePending()
@@ -415,6 +430,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             coroutineScope {
                 launch { refreshReviews(force) }
                 launch { refreshCrowding(force) }
+                launch { refreshRecentViews() }
             }
 
             // Se guarda la hora si hay internet y se trajeron los datos
@@ -511,6 +527,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                 refreshCrowding()
                 if (crowding.isEmpty()) crowding.putAll(localStore.loadCrowding())
             }
+            launch { refreshRecentViews() }
         }
         startupDone = true
     }
@@ -536,6 +553,10 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         savedHome = if (services.preferences.current.value.rememberHomeFilters) services.preferences.loadHomeFilters() else HomeFilterState()
         updatePending()
         recentSearches = localStore.loadRecentSearches()
+        attemptOrNull { services.recentViewsRepository.cached() }?.let {
+            recentViews = it.items
+            recentViewsUpdatedAt = it.updatedAt
+        }
         lastSyncTime = services.localStore.loadDocument(LocalStore.LAST_SYNC_KEY)?.fetchedAt
         loadRemote()
     }
@@ -594,7 +615,30 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         pendingRestaurant = it
     }
 
+    fun recordView(restaurantId: String) {
+        val now = System.currentTimeMillis()
+        val current = recentViews
+        scope.launch {
+            val snapshot = attemptOrNull { services.recentViewsRepository.recordView(current, restaurantId, now) }
+            if (snapshot != null) {
+                recentViews = snapshot.items
+            }
+            enqueueAndFlush(services.recentViewsRepository.logRequest(restaurantId, now))
+        }
+    }
+
+    fun clearRecentViews() {
+        recentViews = emptyList()
+        scope.launch {
+            attemptOrNull { services.recentViewsRepository.clearLocal() }?.let {
+                recentViewsUpdatedAt = it.updatedAt
+            }
+            enqueueAndFlush(services.recentViewsRepository.clearRequest())
+        }
+    }
+
     fun commitDetail(r: Restaurant) {
+        recordView(r.id)
         analytics.onOccupancyChecked(r.id, crowding[r.id].orEmpty().isNotEmpty())
         selectedRestaurantId = r.id
         pendingRestaurant = null
@@ -630,10 +674,11 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     // Se cambio para que cuando se le de click al back si se llego desde las reseñas, nos devuelva a las reseñas
     fun backFromDetail() {
         val prev = overlayStack.getOrNull(overlayStack.lastIndex - 1)
-        if (prev == Overlay.Ranking || prev == Overlay.MyReviews) popOverlay() else closeAll()
+        if (prev == Overlay.Ranking || prev == Overlay.MyReviews || prev == Overlay.RecentlyViewed) popOverlay() else closeAll()
     }
 
     fun openDetailFromRanking(r: Restaurant) {
+        recordView(r.id)
         analytics.onOccupancyChecked(r.id, crowding[r.id].orEmpty().isNotEmpty())
         selectedRestaurantId = r.id
         overlayStack.add(Overlay.Detail)
@@ -651,6 +696,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     SectionVisibilityEffect(AppSection.Map, mapVisible, sections)
     SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
     SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
+    LaunchedEffect(favoritesVisible) {
+        if (favoritesVisible) refreshRecentViews()
+    }
 
     BackHandler(enabled = pendingRestaurant != null || overlayStack.isNotEmpty() || currentTab != 0) {
         when {
@@ -858,6 +906,21 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         )
                     }
 
+                    overlay == Overlay.RecentlyViewed -> {
+                        LaunchedEffect(Unit) { refreshRecentViews() }
+                        RecentlyViewedView(
+                            entries = resolveRecentlyViewed(recentViews, restaurants),
+                            updatedAt = recentViewsUpdatedAt,
+                            isOnline = online,
+                            onSelect = {
+                                sections.onInteraction(AppSection.Favorites, SectionAction.SavedItemSelected)
+                                openDetailFromRanking(it)
+                            },
+                            onClear = ::clearRecentViews,
+                            onBack = ::popOverlay
+                        )
+                    }
+
                     overlay == Overlay.Survey -> SurveyView(
                         initialName = profile.name,
                         onComplete = { answers ->
@@ -959,7 +1022,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             },
                             crowding = crowding,
                             savedIds = savedIds,
-                            userLocation = userLocation.location
+                            userLocation = userLocation.location,
+                            recentlyViewed = resolveRecentlyViewed(recentViews, restaurants),
+                            onSeeAllRecent = { overlayStack.add(Overlay.RecentlyViewed) }
                         )
                         PROFILE_TAB -> ProfileView(
                             profile = profile,
