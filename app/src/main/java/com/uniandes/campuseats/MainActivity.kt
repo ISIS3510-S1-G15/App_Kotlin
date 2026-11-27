@@ -87,7 +87,6 @@ import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SettingsView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
-import com.uniandes.campuseats.ui.PartnerReportView
 import com.uniandes.campuseats.ui.RankingView
 import com.uniandes.campuseats.ui.MyReviewsView
 import com.uniandes.campuseats.ui.RecentlyViewedView
@@ -110,7 +109,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings, Ranking, MyReviews, RecentlyViewed }
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, Settings, Ranking, MyReviews, RecentlyViewed }
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
@@ -373,6 +372,20 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         attemptOrNull { localStore.saveCrowding(merged) }
     }
 
+    suspend fun refreshRecentViews() {
+        if (!services.connectivity.online.value || recentViewsSyncing) return
+        recentViewsSyncing = true
+        try {
+            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let {
+                recentViews = it.items
+                recentViewsUpdatedAt = it.updatedAt
+            }
+            updatePending()
+        } finally {
+            recentViewsSyncing = false
+        }
+    }
+
     suspend fun flushOutbox(ignoreBackoff: Boolean = false) {
         // El perfil editado offline tambien se reintenta al reconectar (antes solo al abrir la app)
         attemptOrNull { services.profileSynchronizer.syncPending() }
@@ -402,20 +415,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         }
         // Si algo quedo en cola, WorkManager lo termina en segundo plano con backoff aunque cierren la app
         if (result.remaining > 0) services.syncScheduler.scheduleOutboxSync()
-    }
-
-    suspend fun refreshRecentViews() {
-        if (!services.connectivity.online.value || recentViewsSyncing) return
-        recentViewsSyncing = true
-        try {
-            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let {
-                recentViews = it.items
-                recentViewsUpdatedAt = it.updatedAt
-            }
-            updatePending()
-        } finally {
-            recentViewsSyncing = false
-        }
     }
 
     suspend fun enqueueAndFlush(request: OutboxRequest) {
@@ -710,7 +709,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     val mapVisible = overlay == null && currentTab == MAP_TAB
     val favoritesVisible = overlay == null && currentTab == FAVORITES_TAB
-    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList || overlay == Overlay.PartnerReport
+    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList
     SectionVisibilityEffect(AppSection.Map, mapVisible, sections)
     SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
     SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
@@ -821,7 +820,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
                             overlayStack.add(Overlay.ReviewsList)
                         },
-                        onPartnerReport = { overlayStack.add(Overlay.PartnerReport) },
                         isOnline = online,
                         onGetDirections = { tags ->
                             sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
@@ -861,14 +859,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         }
                     )
 
-                    overlay == Overlay.PartnerReport && restaurant != null -> PartnerReportView(
-                        restaurant = restaurant,
-                        loadReport = { id, days, force ->
-                            services.partnerReportRepository.load(id, days, user.id, force)
-                        },
-                        onBack = ::popOverlay,
-                        isOnline = online
-                    )
 
                     overlay == Overlay.Ranking -> {
                         val rankingViewModel: RankingViewModel = viewModel(factory = RankingViewModel.factory(services))

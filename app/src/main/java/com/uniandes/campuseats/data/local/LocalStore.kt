@@ -81,7 +81,7 @@ class LocalStore(
 
     /**
      * Borra todo lo que pertenece al usuario que cierra sesión: perfil, guardados, cola de salida, búsquedas
-     * recientes, informes de partner y la marca de última sincronización. Los datos públicos (restaurantes,
+     * recientes y la marca de última sincronización. Los datos públicos (restaurantes,
      * catálogo, reseñas, ocupación) se conservan para que la siguiente sesión también funcione sin conexión.
      */
     suspend fun clearUserData() {
@@ -90,7 +90,6 @@ class LocalStore(
             dao.clearSaved()
             dao.clearOutbox()
             dao.clearRecentSearches()
-            dao.deleteDocumentsWithPrefix(CacheKeys.PARTNER_REPORT_PREFIX)
             dao.deleteDocument(LAST_SYNC_KEY)
             dao.deleteDocument(DATA_OWNER_KEY)
             dao.deleteDocument(RECENT_VIEWS_KEY)
