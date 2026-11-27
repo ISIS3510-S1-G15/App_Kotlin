@@ -98,7 +98,6 @@ fun DetailView(
     onBack: () -> Unit,
     onWriteReview: () -> Unit,
     onSeeReviews: () -> Unit,
-    onPartnerReport: (() -> Unit)? = null,
     onGetDirections: (tags: List<String>) -> Unit,
     isOnline: Boolean = true
 ) {
@@ -589,26 +588,6 @@ fun DetailView(
                         fontWeight = FontWeight.Bold,
                         fontFamily = OutfitFontFamily
                     )
-                }
-                if (onPartnerReport != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(1.dp, Outline, RoundedCornerShape(16.dp))
-                            .clickable(onClick = onPartnerReport),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Partner report",
-                            color = Muted,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = OutfitFontFamily
-                        )
-                    }
                 }
                 Row(
                     modifier = Modifier
