@@ -5,8 +5,12 @@ import com.uniandes.campuseats.data.outbox.OutboxEntry
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.RemoteApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -17,47 +21,49 @@ data class RecentView(
     val lastViewedAt: Long
 )
 
-data class RecentViewsSnapshot(
-    val items: List<RecentView>,
-    val updatedAt: Long?
-)
-
 class RecentViewsRepository(
     private val api: RemoteApi,
     private val store: LocalStore,
     private val clock: () -> Long = System::currentTimeMillis
 ) {
+    private val migrationLock = Mutex()
+    private var migrated = false
 
-    suspend fun cached(): RecentViewsSnapshot {
-        val doc = store.loadDocument(LocalStore.RECENT_VIEWS_KEY) ?: return RecentViewsSnapshot(emptyList(), null)
-        val items = runCatching { decode(JSONArray(doc.payload)) }.getOrDefault(emptyList())
-        return RecentViewsSnapshot(items, doc.fetchedAt.takeIf { it > 0L })
+    fun observe(): Flow<List<RecentView>> = store.observeRecentViews()
+        .onStart { prepare() }
+        .catch { emit(emptyList()) }
+
+    suspend fun syncedAt(): Long? {
+        prepare()
+        return store.recentViewsSyncedAt()
     }
 
-    suspend fun fetch(pending: suspend () -> List<OutboxEntry>): RecentViewsSnapshot {
-        val json = api.get("$RECENT_VIEWS_PATH?limit=$FETCH_LIMIT")
+    suspend fun fetch(pending: suspend () -> List<OutboxEntry>): Long {
+        prepare()
+        val json = api.get("$RECENT_VIEWS_PATH?limit=$MAX_ITEMS")
         val remote = parseRemote(json.optJSONArray("items") ?: JSONArray())
         val merged = applyPending(remote, pending().filter { isRecentViewsRequest(it.request) })
         val now = clock()
-        save(merged, now)
-        return RecentViewsSnapshot(merged, now)
+        store.replaceRecentViews(merged, now, MAX_ITEMS, MAX_AGE_MS)
+        return now
     }
 
-    suspend fun recordView(current: List<RecentView>, restaurantId: String, at: Long, updatedAt: Long?): RecentViewsSnapshot {
-        val updated = increment(current, restaurantId, at)
-        save(updated, updatedAt ?: 0L)
-        return RecentViewsSnapshot(updated, updatedAt)
+    suspend fun recordView(restaurantId: String, at: Long) {
+        prepare()
+        store.recordRecentView(restaurantId, at, MAX_ITEMS, MAX_AGE_MS)
     }
 
-    suspend fun removeLocal(current: List<RecentView>, restaurantId: String, updatedAt: Long?): RecentViewsSnapshot {
-        val updated = current.filter { it.restaurantId != restaurantId }
-        save(updated, updatedAt ?: 0L)
-        return RecentViewsSnapshot(updated, updatedAt)
+    suspend fun remove(restaurantId: String) {
+        store.removeRecentView(restaurantId)
     }
 
-    suspend fun clearLocal(updatedAt: Long?): RecentViewsSnapshot {
-        save(emptyList(), updatedAt ?: 0L)
-        return RecentViewsSnapshot(emptyList(), updatedAt)
+    suspend fun clear() {
+        store.clearRecentViews()
+    }
+
+    suspend fun prune() {
+        prepare()
+        store.pruneRecentViews(MAX_ITEMS, MAX_AGE_MS)
     }
 
     fun logRequest(restaurantId: String, at: Long) = OutboxRequest(
@@ -75,6 +81,15 @@ class RecentViewsRepository(
     fun isRecentViewsRequest(request: OutboxRequest): Boolean =
         request.kind == OutboxKind.ANALYTICS &&
             (request.path == LOG_VIEW_PATH || request.path == RECENT_VIEWS_PATH || request.path.startsWith("$RECENT_VIEWS_PATH/"))
+
+    private suspend fun prepare() {
+        if (migrated) return
+        migrationLock.withLock {
+            if (migrated) return
+            store.migrateLegacyRecentViews()
+            migrated = true
+        }
+    }
 
     private fun applyPending(base: List<RecentView>, pending: List<OutboxEntry>): List<RecentView> {
         var result = base
@@ -103,13 +118,7 @@ class RecentViewsRepository(
             viewCount = (existing?.viewCount ?: 0) + 1,
             lastViewedAt = maxOf(existing?.lastViewedAt ?: 0L, at)
         )
-        return (listOf(updated) + current.filter { it.restaurantId != restaurantId })
-            .sortedByDescending { it.lastViewedAt }
-            .take(FETCH_LIMIT)
-    }
-
-    private suspend fun save(items: List<RecentView>, updatedAt: Long) {
-        store.saveDocument(LocalStore.RECENT_VIEWS_KEY, encode(items).toString(), updatedAt)
+        return listOf(updated) + current.filter { it.restaurantId != restaurantId }
     }
 
     private fun parseRemote(array: JSONArray): List<RecentView> = (0 until array.length()).mapNotNull { index ->
@@ -122,30 +131,12 @@ class RecentViewsRepository(
         )
     }
 
-    private fun encode(items: List<RecentView>): JSONArray = JSONArray().apply {
-        items.forEach {
-            put(
-                JSONObject()
-                    .put("restaurant_id", it.restaurantId)
-                    .put("view_count", it.viewCount)
-                    .put("last_viewed_at", it.lastViewedAt)
-            )
-        }
-    }
-
-    private fun decode(array: JSONArray): List<RecentView> = (0 until array.length()).mapNotNull { index ->
-        val item = array.optJSONObject(index) ?: return@mapNotNull null
-        RecentView(
-            restaurantId = item.optString("restaurant_id"),
-            viewCount = item.optInt("view_count", 1),
-            lastViewedAt = item.optLong("last_viewed_at")
-        )
-    }.filter { it.restaurantId.isNotBlank() }
-
     companion object {
         const val RECENT_VIEWS_PATH = "/me/recent-views"
         const val LOG_VIEW_PATH = "/analytics/restaurant-view"
-        private const val FETCH_LIMIT = 50
+        const val MAX_ITEMS = 50
+        const val MAX_AGE_DAYS = 30
+        const val MAX_AGE_MS = MAX_AGE_DAYS * 24L * 60L * 60L * 1000L
 
         fun formatIso(millis: Long): String =
             SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {

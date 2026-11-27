@@ -2,6 +2,7 @@ package com.uniandes.campuseats.data.local
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "reviews")
@@ -61,6 +62,16 @@ data class OutboxEntity(
     val attempts: Int = 0,
     @ColumnInfo(defaultValue = "''") val requestId: String = "",
     @ColumnInfo(defaultValue = "0") val nextAttemptAt: Long = 0L
+)
+
+@Entity(
+    tableName = "recent_views",
+    indices = [Index(value = ["lastViewedAt"])]
+)
+data class RecentViewEntity(
+    @PrimaryKey val restaurantId: String,
+    val viewCount: Int,
+    val lastViewedAt: Long
 )
 
 @Entity(tableName = "cache_documents")
