@@ -58,6 +58,7 @@ private val GreenBorder = Color(0xFFC5E0CB)
 fun ProfileView(
     profile: Profile,
     userEmail: String,
+    showSettings: Boolean,
     showLogoutWarning: Boolean,
     onRetakeSurvey: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -428,30 +429,32 @@ fun ProfileView(
                     fontWeight = FontWeight.SemiBold
                 )
             }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White)
-                    .border(1.dp, Outline, RoundedCornerShape(16.dp))
-                    .clickable(onClick = onOpenSettings),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Settings,
-                    contentDescription = null,
-                    tint = Ink,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Settings, cache & sync",
-                    color = Ink,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+            if (showSettings) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White)
+                        .border(1.dp, Outline, RoundedCornerShape(16.dp))
+                        .clickable(onClick = onOpenSettings),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Settings,
+                        contentDescription = null,
+                        tint = Ink,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Settings, cache & sync",
+                        color = Ink,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
             Text(
                 text = "Signed in as $userEmail",
