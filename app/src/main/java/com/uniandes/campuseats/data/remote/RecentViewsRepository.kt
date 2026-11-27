@@ -1,15 +1,23 @@
 package com.uniandes.campuseats.data.remote
 
+import com.uniandes.campuseats.data.cache.CachePolicy
+import com.uniandes.campuseats.data.cache.CacheStats
+import com.uniandes.campuseats.data.cache.CacheTtl
+import com.uniandes.campuseats.data.cache.MemoryCache
 import com.uniandes.campuseats.data.local.LocalStore
 import com.uniandes.campuseats.data.outbox.OutboxEntry
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.RemoteApi
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -21,13 +29,47 @@ data class RecentView(
     val lastViewedAt: Long
 )
 
+enum class RecentViewsSource { Memory, Disk, Network }
+
+data class RecentViewsSync(val syncedAt: Long?, val source: RecentViewsSource)
+
 class RecentViewsRepository(
     private val api: RemoteApi,
     private val store: LocalStore,
-    private val clock: () -> Long = System::currentTimeMillis
+    private val policy: CachePolicy = CachePolicy(),
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val computation: CoroutineDispatcher = Dispatchers.Default
 ) {
     private val migrationLock = Mutex()
+    private val writeLock = Mutex()
     private var migrated = false
+    private val syncCache = MemoryCache<String, Long>(maxEntries = 1)
+
+    val cacheStats: StateFlow<CacheStats> get() = syncCache.stats
+
+    suspend fun sync(force: Boolean, pending: suspend () -> List<OutboxEntry>): RecentViewsSync {
+        prepare()
+        if (force) {
+            syncCache.invalidate(SYNC_KEY)
+        } else {
+            val inMemory = syncCache.get(SYNC_KEY)
+            if (policy.isFresh(inMemory, CacheTtl.RECENT_VIEWS)) {
+                return RecentViewsSync(inMemory, RecentViewsSource.Memory)
+            }
+            syncCache.invalidate(SYNC_KEY)
+            val onDisk = store.recentViewsSyncedAt()
+            if (onDisk != null && policy.isFresh(onDisk, CacheTtl.RECENT_VIEWS)) {
+                syncCache.put(SYNC_KEY, onDisk)
+                return RecentViewsSync(onDisk, RecentViewsSource.Disk)
+            }
+        }
+        val syncedAt = syncCache.getOrLoad(SYNC_KEY) { fetch(pending) }
+        return RecentViewsSync(syncedAt, RecentViewsSource.Network)
+    }
+
+    fun invalidate() {
+        syncCache.clear()
+    }
 
     fun observe(): Flow<List<RecentView>> = store.observeRecentViews()
         .onStart { prepare() }
@@ -41,24 +83,36 @@ class RecentViewsRepository(
     suspend fun fetch(pending: suspend () -> List<OutboxEntry>): Long {
         prepare()
         val json = api.get("$RECENT_VIEWS_PATH?limit=$MAX_ITEMS")
-        val remote = parseRemote(json.optJSONArray("items") ?: JSONArray())
-        val merged = applyPending(remote, pending().filter { isRecentViewsRequest(it.request) })
-        val now = clock()
-        store.replaceRecentViews(merged, now, MAX_ITEMS, MAX_AGE_MS)
-        return now
+        val remote = withContext(computation) { parseRemote(json.optJSONArray("items") ?: JSONArray()) }
+        return writeLock.withLock {
+            val queued = pending()
+            val merged = withContext(computation) { applyPending(remote, queued.filter { isRecentViewsRequest(it.request) }) }
+            val now = clock()
+            store.replaceRecentViews(merged, now, MAX_ITEMS, MAX_AGE_MS)
+            now
+        }
     }
 
-    suspend fun recordView(restaurantId: String, at: Long) {
+    suspend fun recordView(restaurantId: String, at: Long, enqueue: suspend (OutboxRequest) -> Unit) {
         prepare()
-        store.recordRecentView(restaurantId, at, MAX_ITEMS, MAX_AGE_MS)
+        writeLock.withLock {
+            store.recordRecentView(restaurantId, at, MAX_ITEMS, MAX_AGE_MS)
+            enqueue(logRequest(restaurantId, at))
+        }
     }
 
-    suspend fun remove(restaurantId: String) {
-        store.removeRecentView(restaurantId)
+    suspend fun remove(restaurantId: String, enqueue: suspend (OutboxRequest) -> Unit) {
+        writeLock.withLock {
+            store.removeRecentView(restaurantId)
+            enqueue(removeRequest(restaurantId))
+        }
     }
 
-    suspend fun clear() {
-        store.clearRecentViews()
+    suspend fun clear(enqueue: suspend (OutboxRequest) -> Unit) {
+        writeLock.withLock {
+            store.clearRecentViews()
+            enqueue(clearRequest())
+        }
     }
 
     suspend fun prune() {
@@ -92,33 +146,29 @@ class RecentViewsRepository(
     }
 
     private fun applyPending(base: List<RecentView>, pending: List<OutboxEntry>): List<RecentView> {
-        var result = base
-        pending.map { it.request }.forEach { request ->
+        if (pending.isEmpty()) return base
+        val result = LinkedHashMap<String, RecentView>(base.size * 2)
+        for (view in base) result[view.restaurantId] = view
+        for (entry in pending) {
+            val request = entry.request
             when {
-                request.method == "DELETE" && request.path == RECENT_VIEWS_PATH -> result = emptyList()
-                request.method == "DELETE" && request.path.startsWith("$RECENT_VIEWS_PATH/") -> {
-                    val id = request.path.removePrefix("$RECENT_VIEWS_PATH/")
-                    result = result.filter { it.restaurantId != id }
-                }
+                request.method == "DELETE" && request.path == RECENT_VIEWS_PATH -> result.clear()
+                request.method == "DELETE" && request.path.startsWith(ITEM_PREFIX) ->
+                    result.remove(request.path.substring(ITEM_PREFIX.length))
                 request.method == "POST" && request.path == LOG_VIEW_PATH -> {
-                    val body = request.body ?: return@forEach
-                    val id = body["restaurant_id"]?.toString() ?: return@forEach
+                    val body = request.body ?: continue
+                    val id = body["restaurant_id"]?.toString() ?: continue
                     val at = (body["viewed_at"] as? String)?.let(::parseIso) ?: clock()
-                    result = increment(result, id, at)
+                    val existing = result[id]
+                    result[id] = RecentView(
+                        restaurantId = id,
+                        viewCount = (existing?.viewCount ?: 0) + 1,
+                        lastViewedAt = maxOf(existing?.lastViewedAt ?: 0L, at)
+                    )
                 }
             }
         }
-        return result
-    }
-
-    private fun increment(current: List<RecentView>, restaurantId: String, at: Long): List<RecentView> {
-        val existing = current.firstOrNull { it.restaurantId == restaurantId }
-        val updated = RecentView(
-            restaurantId = restaurantId,
-            viewCount = (existing?.viewCount ?: 0) + 1,
-            lastViewedAt = maxOf(existing?.lastViewedAt ?: 0L, at)
-        )
-        return listOf(updated) + current.filter { it.restaurantId != restaurantId }
+        return ArrayList(result.values)
     }
 
     private fun parseRemote(array: JSONArray): List<RecentView> = (0 until array.length()).mapNotNull { index ->
@@ -137,18 +187,28 @@ class RecentViewsRepository(
         const val MAX_ITEMS = 50
         const val MAX_AGE_DAYS = 30
         const val MAX_AGE_MS = MAX_AGE_DAYS * 24L * 60L * 60L * 1000L
+        private const val SYNC_KEY = "recent_views.synced_at"
 
-        fun formatIso(millis: Long): String =
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+        private const val ITEM_PREFIX = "$RECENT_VIEWS_PATH/"
+
+        private val isoOut = object : ThreadLocal<SimpleDateFormat>() {
+            override fun initialValue() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                 timeZone = TimeZone.getTimeZone("UTC")
-            }.format(millis)
+            }
+        }
+
+        private val isoIn = object : ThreadLocal<SimpleDateFormat>() {
+            override fun initialValue() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+        }
+
+        fun formatIso(millis: Long): String = isoOut.get()!!.format(millis)
 
         fun parseIso(raw: String?): Long? {
             if (raw.isNullOrBlank() || raw.length < 19) return null
             val base = runCatching {
-                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }.parse(raw.substring(0, 19).replace(' ', 'T'))?.time
+                isoIn.get()!!.parse(raw.substring(0, 19).replace(' ', 'T'))?.time
             }.getOrNull() ?: return null
             var rest = raw.substring(19)
             var fraction = 0L

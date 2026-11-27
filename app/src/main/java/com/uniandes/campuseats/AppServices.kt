@@ -83,7 +83,7 @@ class AppServices private constructor(val appContext: Context) {
     val profileRepository = ProfileRepository(api)
     val profileSynchronizer = ProfileSynchronizer(localStore, profileRepository)
     val savedRepository = SavedRepository(api)
-    val recentViewsRepository = RecentViewsRepository(api, localStore)
+    val recentViewsRepository = RecentViewsRepository(api, localStore, cachePolicy)
     val restaurantRepository = RestaurantRepository(api, documentCache, policy = cachePolicy, memory = objectMemoryCache)
     val reviewRepository = ReviewRepository(api, documentCache, cachePolicy, objectMemoryCache)
     val catalogRepository = CatalogRepository(api, documentCache, cachePolicy, objectMemoryCache)
@@ -195,6 +195,7 @@ class AppServices private constructor(val appContext: Context) {
         objectMemoryCache.clear()
         documentMemoryCache.clear()
         rankingCache.clear()
+        recentViewsRepository.invalidate()
     }
 
     private fun trimMemoryCaches(fraction: Float) {
@@ -216,7 +217,8 @@ class AppServices private constructor(val appContext: Context) {
 
     fun memoryCacheStats(): List<Pair<String, StateFlow<CacheStats>>> = listOf(
         "Parsed objects" to objectMemoryCache.stats,
-        "Documents" to documentMemoryCache.stats
+        "Documents" to documentMemoryCache.stats,
+        "Recent views sync" to recentViewsRepository.cacheStats
     )
 
     data class DiskCacheReport(val documents: Int, val bytes: Long)

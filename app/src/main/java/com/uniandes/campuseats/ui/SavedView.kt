@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,6 +64,8 @@ private val StarColor = Color(0xFFF4A735)
 private val Disabled = Color(0xFFB8AC9E)
 private val OpenGreen = Color(0xFF1E9E2F)
 private const val RECENT_PREVIEW_LIMIT = 8
+private val RecentCardShape = RoundedCornerShape(18.dp)
+private val RecentCardWidth = 150.dp
 
 private const val PLUS_PATH = "M12 5V19M5 12H19"
 private const val BOOKMARK_PATH = "M5 3H19C19.6 3 20 3.4 20 4V21L12 17L4 21V4C4 3.4 4.4 3 5 3Z"
@@ -388,7 +391,9 @@ private fun RecentlyViewedSection(
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 entries.take(RECENT_PREVIEW_LIMIT).forEach { entry ->
-                    RecentPreviewCard(entry.restaurant, onSelect)
+                    key(entry.restaurant.id) {
+                        RecentPreviewCard(entry, onSelect)
+                    }
                 }
             }
         }
@@ -396,15 +401,15 @@ private fun RecentlyViewedSection(
 }
 
 @Composable
-private fun RecentPreviewCard(r: Restaurant, onSelect: (Restaurant) -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
+private fun RecentPreviewCard(entry: RecentlyViewedEntry, onSelect: (Restaurant) -> Unit) {
+    val r = entry.restaurant
     Column(
         modifier = Modifier
-            .width(150.dp)
-            .shadow(1.dp, shape)
-            .clip(shape)
+            .width(RecentCardWidth)
+            .shadow(1.dp, RecentCardShape)
+            .clip(RecentCardShape)
             .background(Color.White)
-            .border(1.dp, CardBorder, shape)
+            .border(1.dp, CardBorder, RecentCardShape)
             .clickable { onSelect(r) }
     ) {
         Box(
@@ -416,6 +421,7 @@ private fun RecentPreviewCard(r: Restaurant, onSelect: (Restaurant) -> Unit) {
                 model = r.image,
                 contentDescription = r.name,
                 contentScale = ContentScale.Crop,
+                thumbnailSize = RecentCardWidth,
                 modifier = Modifier.fillMaxSize()
             )
             Box(
@@ -428,7 +434,7 @@ private fun RecentPreviewCard(r: Restaurant, onSelect: (Restaurant) -> Unit) {
                     )
             )
             Text(
-                text = if (r.isOpen) "Open" else "Closed",
+                text = if (entry.isOpen) "Open" else "Closed",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.White,
@@ -436,7 +442,7 @@ private fun RecentPreviewCard(r: Restaurant, onSelect: (Restaurant) -> Unit) {
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
                     .clip(CircleShape)
-                    .background(if (r.isOpen) OpenGreen else Color.Black.copy(alpha = 0.6f))
+                    .background(if (entry.isOpen) OpenGreen else Color.Black.copy(alpha = 0.6f))
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             )
         }

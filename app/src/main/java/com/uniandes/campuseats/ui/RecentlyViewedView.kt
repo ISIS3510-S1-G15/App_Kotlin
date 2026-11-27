@@ -46,13 +46,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.uniandes.campuseats.data.Restaurant
-import com.uniandes.campuseats.data.remote.RecentView
 import com.uniandes.campuseats.data.remote.RecentViewsRepository
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 
 private val HistoryCream = Color(0xFFF5EBE0)
 private val HistoryInk = Color(0xFF1A1208)
@@ -62,67 +57,30 @@ private val HistoryOpen = Color(0xFF1E9E2F)
 private val HistoryClosed = Color(0xFFA39A90)
 private val HistoryAccent = Color(0xFFE8440A)
 private val HistoryBanner = Color(0xFF1F1915)
-
-data class RecentlyViewedEntry(val restaurant: Restaurant, val view: RecentView)
-
-fun resolveRecentlyViewed(views: List<RecentView>, restaurants: List<Restaurant>): List<RecentlyViewedEntry> {
-    val byId = restaurants.associateBy { it.id }
-    return views
-        .sortedByDescending { it.lastViewedAt }
-        .mapNotNull { view -> byId[view.restaurantId]?.let { RecentlyViewedEntry(it, view) } }
-}
-
-fun formatClock(millis: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
-
-private fun startOfDay(millis: Long): Long = Calendar.getInstance().apply {
-    timeInMillis = millis
-    set(Calendar.HOUR_OF_DAY, 0)
-    set(Calendar.MINUTE, 0)
-    set(Calendar.SECOND, 0)
-    set(Calendar.MILLISECOND, 0)
-}.timeInMillis
-
-private fun dayLabel(millis: Long, now: Long): String {
-    val today = startOfDay(now)
-    val day = startOfDay(millis)
-    val yesterday = Calendar.getInstance().apply {
-        timeInMillis = today
-        add(Calendar.DAY_OF_YEAR, -1)
-    }.timeInMillis
-    return when {
-        day >= today -> "TODAY"
-        day == yesterday -> "YESTERDAY"
-        else -> SimpleDateFormat("EEEE, MMM d", Locale.ENGLISH).format(Date(millis)).uppercase(Locale.ENGLISH)
-    }
-}
-
-private sealed interface HistoryRow {
-    data class Header(val label: String) : HistoryRow
-    data class Item(val entry: RecentlyViewedEntry) : HistoryRow
-}
+private val CardShape = RoundedCornerShape(20.dp)
+private val ThumbShape = RoundedCornerShape(14.dp)
+private val BannerShape = RoundedCornerShape(16.dp)
+private val LinkShape = RoundedCornerShape(6.dp)
+private val ThumbSize = 96.dp
 
 @Composable
 fun RecentlyViewedView(
-    entries: List<RecentlyViewedEntry>,
+    state: RecentlyViewedUi,
     updatedAt: Long?,
     isOnline: Boolean,
     pendingChanges: Int,
     isSyncing: Boolean,
+    fromCache: Boolean,
+    onRefresh: () -> Unit,
     onSelect: (Restaurant) -> Unit,
     onRemove: (Restaurant) -> Unit,
     onClear: () -> Unit,
     onBack: () -> Unit
 ) {
+    val entries = state.entries
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var removeCandidateId by rememberSaveable { mutableStateOf<String?>(null) }
-    val removeCandidate = entries.firstOrNull { it.restaurant.id == removeCandidateId }?.restaurant
-    val now = System.currentTimeMillis()
-    val rows = buildList {
-        entries.groupBy { dayLabel(it.view.lastViewedAt, now) }.forEach { (label, group) ->
-            add(HistoryRow.Header(label))
-            group.forEach { add(HistoryRow.Item(it)) }
-        }
-    }
+    val removeCandidate = removeCandidateId?.let { state.byId[it]?.restaurant }
 
     Column(
         modifier = Modifier
@@ -177,11 +135,27 @@ fun RecentlyViewedView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = updatedAt?.let { "Updated at ${formatClock(it)}" } ?: "Not synced yet",
-                fontSize = 13.sp,
-                color = HistoryFaint
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = buildString {
+                        append(updatedAt?.let { "Updated at ${formatClock(it)}" } ?: "Not synced yet")
+                        if (updatedAt != null && fromCache) append(" · cached")
+                    },
+                    fontSize = 13.sp,
+                    color = HistoryFaint
+                )
+                Text(
+                    text = "Refresh",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (isSyncing) HistoryFaint else HistoryAccent,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .clip(LinkShape)
+                        .clickable(enabled = !isSyncing, onClick = onRefresh)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
             val syncLabel = when {
                 isSyncing && isOnline -> "Syncing…"
                 pendingChanges == 1 -> "1 change waiting to sync"
@@ -214,14 +188,9 @@ fun RecentlyViewedView(
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(rows, key = { row ->
+                items(state.rows, key = { it.key }, contentType = { it.contentType }) { row ->
                     when (row) {
-                        is HistoryRow.Header -> "header_${row.label}"
-                        is HistoryRow.Item -> "item_${row.entry.restaurant.id}"
-                    }
-                }) { row ->
-                    when (row) {
-                        is HistoryRow.Header -> Text(
+                        is RecentlyViewedRow.Header -> Text(
                             text = row.label,
                             fontSize = 13.sp,
                             letterSpacing = 0.5.sp,
@@ -229,7 +198,7 @@ fun RecentlyViewedView(
                             color = HistoryMuted,
                             modifier = Modifier.padding(top = 12.dp, bottom = 2.dp)
                         )
-                        is HistoryRow.Item -> HistoryCard(
+                        is RecentlyViewedRow.Item -> HistoryCard(
                             entry = row.entry,
                             onSelect = onSelect,
                             onLongPress = { removeCandidateId = it.id }
@@ -318,7 +287,7 @@ private fun OfflineHistoryBanner() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(BannerShape)
             .background(HistoryBanner)
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -342,12 +311,10 @@ private fun HistoryCard(
     onLongPress: (Restaurant) -> Unit
 ) {
     val r = entry.restaurant
-    val times = entry.view.viewCount
-    val shape = RoundedCornerShape(20.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
+            .clip(CardShape)
             .background(Color.White)
             .combinedClickable(
                 onClick = { onSelect(r) },
@@ -360,9 +327,10 @@ private fun HistoryCard(
             model = r.image,
             contentDescription = r.name,
             contentScale = ContentScale.Crop,
+            thumbnailSize = ThumbSize,
             modifier = Modifier
-                .size(96.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .size(ThumbSize)
+                .clip(ThumbShape)
         )
         Spacer(Modifier.width(18.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -379,14 +347,14 @@ private fun HistoryCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (r.isOpen) "Open" else "Closed",
+                    text = if (entry.isOpen) "Open" else "Closed",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
-                    color = if (r.isOpen) HistoryOpen else HistoryClosed
+                    color = if (entry.isOpen) HistoryOpen else HistoryClosed
                 )
             }
             Text(
-                text = "${r.category} · ${r.location}",
+                text = entry.subtitle,
                 fontSize = 15.sp,
                 color = HistoryMuted,
                 maxLines = 1,
@@ -394,7 +362,7 @@ private fun HistoryCard(
                 modifier = Modifier.padding(top = 4.dp)
             )
             Text(
-                text = "Viewed $times ${if (times == 1) "time" else "times"} · last at ${formatClock(entry.view.lastViewedAt)}",
+                text = entry.viewedLabel,
                 fontSize = 14.sp,
                 color = HistoryFaint,
                 maxLines = 1,
