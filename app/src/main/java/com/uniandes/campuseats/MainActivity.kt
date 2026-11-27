@@ -197,6 +197,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var recentSearches by remember { mutableStateOf(emptyList<String>()) }
     var recentViews by remember { mutableStateOf(emptyList<RecentView>()) }
     var recentViewsUpdatedAt by remember { mutableStateOf<Long?>(null) }
+    var recentViewsPending by remember { mutableIntStateOf(0) }
+    var recentViewsSyncing by remember { mutableStateOf(false) }
     var catalog by remember { mutableStateOf(Catalog.Empty) }
     var catalogResolved by remember { mutableStateOf(false) }
 
@@ -238,6 +240,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         val queued = attemptOrNull { localStore.pendingCountExcludingAnalytics() } ?: 0
         val profilePending = if (attemptOrNull { services.profileSynchronizer.hasPending() } == true) 1 else 0
         outboxPending = queued + profilePending
+        recentViewsPending = attemptOrNull { localStore.pending() }.orEmpty()
+            .count { services.recentViewsRepository.isRecentViewsRequest(it.request) }
     }
 
     LaunchedEffect(overlay, outboxPending, online) {
@@ -390,6 +394,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             }
         }
         if (OutboxKind.OCCUPANCY in result.sentKinds) refreshCrowding(force = true)
+        if (OutboxKind.ANALYTICS in result.sentKinds && recentViewsPending == 0) refreshRecentViews()
         if (OutboxKind.REVIEW in result.sentKinds) {
             refreshReviews(force = true)
             refreshMyReviews(force = true)
@@ -400,12 +405,16 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     }
 
     suspend fun refreshRecentViews() {
-        if (!services.connectivity.online.value) return
-        val pending = attemptOrNull { localStore.pending() }.orEmpty()
-            .filter { it.request.kind == OutboxKind.ANALYTICS }
-        attemptOrNull { services.recentViewsRepository.fetch(pending) }?.let {
-            recentViews = it.items
-            recentViewsUpdatedAt = it.updatedAt
+        if (!services.connectivity.online.value || recentViewsSyncing) return
+        recentViewsSyncing = true
+        try {
+            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let {
+                recentViews = it.items
+                recentViewsUpdatedAt = it.updatedAt
+            }
+            updatePending()
+        } finally {
+            recentViewsSyncing = false
         }
     }
 
@@ -619,7 +628,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         val now = System.currentTimeMillis()
         val current = recentViews
         scope.launch {
-            val snapshot = attemptOrNull { services.recentViewsRepository.recordView(current, restaurantId, now) }
+            val snapshot = attemptOrNull {
+                services.recentViewsRepository.recordView(current, restaurantId, now, recentViewsUpdatedAt)
+            }
             if (snapshot != null) {
                 recentViews = snapshot.items
             }
@@ -627,12 +638,19 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         }
     }
 
+    fun removeRecentView(restaurantId: String) {
+        val current = recentViews
+        recentViews = current.filter { it.restaurantId != restaurantId }
+        scope.launch {
+            attemptOrNull { services.recentViewsRepository.removeLocal(current, restaurantId, recentViewsUpdatedAt) }
+            enqueueAndFlush(services.recentViewsRepository.removeRequest(restaurantId))
+        }
+    }
+
     fun clearRecentViews() {
         recentViews = emptyList()
         scope.launch {
-            attemptOrNull { services.recentViewsRepository.clearLocal() }?.let {
-                recentViewsUpdatedAt = it.updatedAt
-            }
+            attemptOrNull { services.recentViewsRepository.clearLocal(recentViewsUpdatedAt) }
             enqueueAndFlush(services.recentViewsRepository.clearRequest())
         }
     }
@@ -912,6 +930,9 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             entries = resolveRecentlyViewed(recentViews, restaurants),
                             updatedAt = recentViewsUpdatedAt,
                             isOnline = online,
+                            pendingChanges = recentViewsPending,
+                            isSyncing = recentViewsSyncing,
+                            onRemove = { removeRecentView(it.id) },
                             onSelect = {
                                 sections.onInteraction(AppSection.Favorites, SectionAction.SavedItemSelected)
                                 openDetailFromRanking(it)

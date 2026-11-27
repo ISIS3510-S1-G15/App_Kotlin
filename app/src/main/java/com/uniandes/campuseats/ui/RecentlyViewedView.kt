@@ -1,7 +1,9 @@
 package com.uniandes.campuseats.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -57,6 +60,7 @@ private val HistoryFaint = Color(0xFFADA195)
 private val HistoryOpen = Color(0xFF1E9E2F)
 private val HistoryClosed = Color(0xFFA39A90)
 private val HistoryAccent = Color(0xFFE8440A)
+private val HistoryBanner = Color(0xFF1F1915)
 
 data class RecentlyViewedEntry(val restaurant: Restaurant, val view: RecentView)
 
@@ -101,11 +105,16 @@ fun RecentlyViewedView(
     entries: List<RecentlyViewedEntry>,
     updatedAt: Long?,
     isOnline: Boolean,
+    pendingChanges: Int,
+    isSyncing: Boolean,
     onSelect: (Restaurant) -> Unit,
+    onRemove: (Restaurant) -> Unit,
     onClear: () -> Unit,
     onBack: () -> Unit
 ) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
+    var removeCandidateId by rememberSaveable { mutableStateOf<String?>(null) }
+    val removeCandidate = entries.firstOrNull { it.restaurant.id == removeCandidateId }?.restaurant
     val now = System.currentTimeMillis()
     val rows = buildList {
         entries.groupBy { dayLabel(it.view.lastViewedAt, now) }.forEach { (label, group) ->
@@ -158,16 +167,43 @@ fun RecentlyViewedView(
             }
         }
 
-        val status = buildString {
-            append(updatedAt?.let { "Updated at ${formatClock(it)}" } ?: "Not synced yet")
-            if (!isOnline) append(" · Offline")
+        if (!isOnline) OfflineHistoryBanner()
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = updatedAt?.let { "Updated at ${formatClock(it)}" } ?: "Not synced yet",
+                fontSize = 13.sp,
+                color = HistoryFaint
+            )
+            val syncLabel = when {
+                isSyncing && isOnline -> "Syncing…"
+                pendingChanges == 1 -> "1 change waiting to sync"
+                pendingChanges > 1 -> "$pendingChanges changes waiting to sync"
+                else -> null
+            }
+            if (syncLabel != null) {
+                Text(
+                    text = syncLabel,
+                    fontSize = 13.sp,
+                    color = HistoryAccent
+                )
+            }
         }
-        Text(
-            text = status,
-            fontSize = 13.sp,
-            color = HistoryFaint,
-            modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp)
-        )
+
+        if (entries.isNotEmpty()) {
+            Text(
+                text = "Long-press a place to remove it",
+                fontSize = 12.sp,
+                color = HistoryFaint,
+                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
+            )
+        }
 
         if (entries.isEmpty()) {
             EmptyHistory()
@@ -192,18 +228,53 @@ fun RecentlyViewedView(
                             color = HistoryMuted,
                             modifier = Modifier.padding(top = 12.dp, bottom = 2.dp)
                         )
-                        is HistoryRow.Item -> HistoryCard(row.entry, onSelect)
+                        is HistoryRow.Item -> HistoryCard(
+                            entry = row.entry,
+                            onSelect = onSelect,
+                            onLongPress = { removeCandidateId = it.id }
+                        )
                     }
                 }
             }
         }
     }
 
+    if (removeCandidate != null) {
+        AlertDialog(
+            onDismissRequest = { removeCandidateId = null },
+            title = { Text("Remove from history?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    if (isOnline) "${removeCandidate.name} will be removed from your recently viewed places."
+                    else "${removeCandidate.name} will be removed now and synced when you're back online."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    removeCandidateId = null
+                    onRemove(removeCandidate)
+                }) {
+                    Text("Remove", color = HistoryAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeCandidateId = null }) {
+                    Text("Cancel", color = HistoryMuted)
+                }
+            }
+        )
+    }
+
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             title = { Text("Clear history?", fontWeight = FontWeight.Bold) },
-            text = { Text("All your recently viewed restaurants will be removed.") },
+            text = {
+                Text(
+                    if (isOnline) "All your recently viewed restaurants will be removed."
+                    else "Your history will be cleared on this phone now and synced when you're back online."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmClear = false
@@ -241,7 +312,34 @@ private fun CircleAction(
 }
 
 @Composable
-private fun HistoryCard(entry: RecentlyViewedEntry, onSelect: (Restaurant) -> Unit) {
+private fun OfflineHistoryBanner() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(HistoryBanner)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Outlined.WifiOff, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(
+            text = "You're offline. This is the history saved on this phone. Removed places will sync when you're back online.",
+            fontSize = 14.sp,
+            lineHeight = 19.sp,
+            color = Color.White
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HistoryCard(
+    entry: RecentlyViewedEntry,
+    onSelect: (Restaurant) -> Unit,
+    onLongPress: (Restaurant) -> Unit
+) {
     val r = entry.restaurant
     val times = entry.view.viewCount
     val shape = RoundedCornerShape(20.dp)
@@ -250,7 +348,10 @@ private fun HistoryCard(entry: RecentlyViewedEntry, onSelect: (Restaurant) -> Un
             .fillMaxWidth()
             .clip(shape)
             .background(Color.White)
-            .clickable { onSelect(r) }
+            .combinedClickable(
+                onClick = { onSelect(r) },
+                onLongClick = { onLongPress(r) }
+            )
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
