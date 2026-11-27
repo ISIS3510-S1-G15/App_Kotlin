@@ -15,7 +15,9 @@ object CacheTtl {
     const val REVIEWS = 3 * 60 * 1000L
     const val REVIEW_SUMMARIES = 3 * 60 * 1000L
     const val OCCUPANCY = 1 * 60 * 1000L
+    const val PARTNER_REPORT = 15 * 60 * 1000L
     const val RANKING = 30 * 60 * 1000L
+    const val RECENT_VIEWS = 2 * 60 * 1000L
 }
 
 object CacheKeys {
@@ -25,7 +27,10 @@ object CacheKeys {
     const val REVIEW_SUMMARIES = "review_summaries.v$SCHEMA_VERSION"
     const val OCCUPANCY = "occupancy.v$SCHEMA_VERSION"
 
+    const val PARTNER_REPORT_PREFIX = "partner_report."
+
     fun reviews(restaurantId: String) = "reviews.v$SCHEMA_VERSION.$restaurantId"
+    fun partnerReport(userId: Int, restaurantId: String, days: Int) = "partner_report.v$SCHEMA_VERSION.$userId.$restaurantId.$days"
 }
 
 /**
