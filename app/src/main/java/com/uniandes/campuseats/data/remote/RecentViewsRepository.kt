@@ -1,16 +1,11 @@
 package com.uniandes.campuseats.data.remote
 
-import com.uniandes.campuseats.data.cache.CachePolicy
-import com.uniandes.campuseats.data.cache.CacheStats
-import com.uniandes.campuseats.data.cache.CacheTtl
-import com.uniandes.campuseats.data.cache.MemoryCache
 import com.uniandes.campuseats.data.local.LocalStore
 import com.uniandes.campuseats.data.outbox.OutboxEntry
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.RemoteApi
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.sync.Mutex
@@ -26,45 +21,13 @@ data class RecentView(
     val lastViewedAt: Long
 )
 
-enum class RecentViewsSource { Memory, Disk, Network }
-
-data class RecentViewsSync(val syncedAt: Long?, val source: RecentViewsSource)
-
 class RecentViewsRepository(
     private val api: RemoteApi,
     private val store: LocalStore,
-    private val policy: CachePolicy = CachePolicy(),
     private val clock: () -> Long = System::currentTimeMillis
 ) {
     private val migrationLock = Mutex()
     private var migrated = false
-    private val syncCache = MemoryCache<String, Long>(maxEntries = 1)
-
-    val cacheStats: StateFlow<CacheStats> get() = syncCache.stats
-
-    suspend fun sync(force: Boolean, pending: suspend () -> List<OutboxEntry>): RecentViewsSync {
-        prepare()
-        if (force) {
-            syncCache.invalidate(SYNC_KEY)
-        } else {
-            val inMemory = syncCache.get(SYNC_KEY)
-            if (policy.isFresh(inMemory, CacheTtl.RECENT_VIEWS)) {
-                return RecentViewsSync(inMemory, RecentViewsSource.Memory)
-            }
-            syncCache.invalidate(SYNC_KEY)
-            val onDisk = store.recentViewsSyncedAt()
-            if (onDisk != null && policy.isFresh(onDisk, CacheTtl.RECENT_VIEWS)) {
-                syncCache.put(SYNC_KEY, onDisk)
-                return RecentViewsSync(onDisk, RecentViewsSource.Disk)
-            }
-        }
-        val syncedAt = syncCache.getOrLoad(SYNC_KEY) { fetch(pending) }
-        return RecentViewsSync(syncedAt, RecentViewsSource.Network)
-    }
-
-    fun invalidate() {
-        syncCache.clear()
-    }
 
     fun observe(): Flow<List<RecentView>> = store.observeRecentViews()
         .onStart { prepare() }
@@ -174,7 +137,6 @@ class RecentViewsRepository(
         const val MAX_ITEMS = 50
         const val MAX_AGE_DAYS = 30
         const val MAX_AGE_MS = MAX_AGE_DAYS * 24L * 60L * 60L * 1000L
-        private const val SYNC_KEY = "recent_views.synced_at"
 
         fun formatIso(millis: Long): String =
             SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {

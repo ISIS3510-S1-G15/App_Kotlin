@@ -87,13 +87,11 @@ import com.uniandes.campuseats.ui.SearchView
 import com.uniandes.campuseats.ui.SettingsView
 import com.uniandes.campuseats.ui.SurveyView
 import com.uniandes.campuseats.ui.WriteReviewView
-import com.uniandes.campuseats.ui.PartnerReportView
 import com.uniandes.campuseats.ui.RankingView
 import com.uniandes.campuseats.ui.MyReviewsView
 import com.uniandes.campuseats.ui.RecentlyViewedView
 import com.uniandes.campuseats.ui.resolveRecentlyViewed
 import com.uniandes.campuseats.data.remote.RecentView
-import com.uniandes.campuseats.data.remote.RecentViewsSource
 import com.uniandes.campuseats.ranking.RankingViewModel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -111,7 +109,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Pantallas que se apilan encima de las tabs (igual que los overlays del prototipo). */
-private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, PartnerReport, Settings, Ranking, MyReviews, RecentlyViewed }
+private enum class Overlay { Detail, WriteReview, ReviewsList, Survey, Settings, Ranking, MyReviews, RecentlyViewed }
 private const val MAP_TAB = 2
 private const val FAVORITES_TAB = 3
 private const val PROFILE_TAB = 4
@@ -201,7 +199,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var recentViewsUpdatedAt by remember { mutableStateOf<Long?>(null) }
     var recentViewsPending by remember { mutableIntStateOf(0) }
     var recentViewsSyncing by remember { mutableStateOf(false) }
-    var recentViewsFromCache by remember { mutableStateOf(true) }
     var catalog by remember { mutableStateOf(Catalog.Empty) }
     var catalogResolved by remember { mutableStateOf(false) }
 
@@ -376,6 +373,19 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         attemptOrNull { localStore.saveCrowding(merged) }
     }
 
+    suspend fun refreshRecentViews() {
+        if (!services.connectivity.online.value || recentViewsSyncing) return
+        recentViewsSyncing = true
+        try {
+            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let { syncedAt ->
+                recentViewsUpdatedAt = syncedAt
+            }
+            updatePending()
+        } finally {
+            recentViewsSyncing = false
+        }
+    }
+
     suspend fun flushOutbox(ignoreBackoff: Boolean = false) {
         // El perfil editado offline tambien se reintenta al reconectar (antes solo al abrir la app)
         attemptOrNull { services.profileSynchronizer.syncPending() }
@@ -407,20 +417,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (result.remaining > 0) services.syncScheduler.scheduleOutboxSync()
     }
 
-    suspend fun refreshRecentViews(force: Boolean = false) {
-        if (!services.connectivity.online.value || recentViewsSyncing) return
-        recentViewsSyncing = true
-        try {
-            attemptOrNull { services.recentViewsRepository.sync(force) { localStore.pending() } }?.let {
-                recentViewsUpdatedAt = it.syncedAt
-                recentViewsFromCache = it.source != RecentViewsSource.Network
-            }
-            updatePending()
-        } finally {
-            recentViewsSyncing = false
-        }
-    }
-
     suspend fun enqueueAndFlush(request: OutboxRequest) {
         services.outboxStore.enqueue(request)
         updatePending()
@@ -442,7 +438,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
             coroutineScope {
                 launch { refreshReviews(force) }
                 launch { refreshCrowding(force) }
-                launch { refreshRecentViews(force) }
+                launch { refreshRecentViews() }
             }
 
             // Se guarda la hora si hay internet y se trajeron los datos
@@ -702,7 +698,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     val mapVisible = overlay == null && currentTab == MAP_TAB
     val favoritesVisible = overlay == null && currentTab == FAVORITES_TAB
-    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList || overlay == Overlay.PartnerReport
+    val detailsVisible = overlay == Overlay.Detail || overlay == Overlay.WriteReview || overlay == Overlay.ReviewsList
     SectionVisibilityEffect(AppSection.Map, mapVisible, sections)
     SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
     SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
@@ -813,7 +809,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             sections.onInteraction(AppSection.Details, SectionAction.ReviewsOpened)
                             overlayStack.add(Overlay.ReviewsList)
                         },
-                        onPartnerReport = { overlayStack.add(Overlay.PartnerReport) },
                         isOnline = online,
                         onGetDirections = { tags ->
                             sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
@@ -853,14 +848,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         }
                     )
 
-                    overlay == Overlay.PartnerReport && restaurant != null -> PartnerReportView(
-                        restaurant = restaurant,
-                        loadReport = { id, days, force ->
-                            services.partnerReportRepository.load(id, days, user.id, force)
-                        },
-                        onBack = ::popOverlay,
-                        isOnline = online
-                    )
 
                     overlay == Overlay.Ranking -> {
                         val rankingViewModel: RankingViewModel = viewModel(factory = RankingViewModel.factory(services))
@@ -924,14 +911,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             isOnline = online,
                             pendingChanges = recentViewsPending,
                             isSyncing = recentViewsSyncing,
-                            fromCache = recentViewsFromCache,
-                            onRefresh = {
-                                if (services.connectivity.online.value) {
-                                    scope.launch { refreshRecentViews(force = true) }
-                                } else {
-                                    Toast.makeText(context, "You're offline. Showing saved history.", Toast.LENGTH_SHORT).show()
-                                }
-                            },
                             onRemove = { removeRecentView(it.id) },
                             onSelect = {
                                 sections.onInteraction(AppSection.Favorites, SectionAction.SavedItemSelected)
@@ -1050,6 +1029,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         PROFILE_TAB -> ProfileView(
                             profile = profile,
                             userEmail = user.email,
+                            showSettings = user.isAnalyticsAdmin,
                             showLogoutWarning = auth.showLogoutWarning.collectAsStateWithLifecycle().value,
                             onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
                             onOpenSettings = { overlayStack.add(Overlay.Settings) },

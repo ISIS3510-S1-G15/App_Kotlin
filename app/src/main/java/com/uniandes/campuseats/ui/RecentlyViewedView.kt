@@ -108,8 +108,6 @@ fun RecentlyViewedView(
     isOnline: Boolean,
     pendingChanges: Int,
     isSyncing: Boolean,
-    fromCache: Boolean,
-    onRefresh: () -> Unit,
     onSelect: (Restaurant) -> Unit,
     onRemove: (Restaurant) -> Unit,
     onClear: () -> Unit,
@@ -179,27 +177,11 @@ fun RecentlyViewedView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = buildString {
-                        append(updatedAt?.let { "Updated at ${formatClock(it)}" } ?: "Not synced yet")
-                        if (updatedAt != null && fromCache) append(" · cached")
-                    },
-                    fontSize = 13.sp,
-                    color = HistoryFaint
-                )
-                Text(
-                    text = "Refresh",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (isSyncing) HistoryFaint else HistoryAccent,
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable(enabled = !isSyncing, onClick = onRefresh)
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                )
-            }
+            Text(
+                text = updatedAt?.let { "Updated at ${formatClock(it)}" } ?: "Not synced yet",
+                fontSize = 13.sp,
+                color = HistoryFaint
+            )
             val syncLabel = when {
                 isSyncing && isOnline -> "Syncing…"
                 pendingChanges == 1 -> "1 change waiting to sync"
