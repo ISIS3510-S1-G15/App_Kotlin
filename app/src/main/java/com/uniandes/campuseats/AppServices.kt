@@ -29,6 +29,7 @@ import com.uniandes.campuseats.data.remote.OccupancyRepository
 import com.uniandes.campuseats.data.remote.PartnerReportRepository
 import com.uniandes.campuseats.data.remote.ProfileRepository
 import com.uniandes.campuseats.data.remote.ProfileSynchronizer
+import com.uniandes.campuseats.data.remote.RecentViewsRepository
 import com.uniandes.campuseats.data.remote.RestaurantRepository
 import com.uniandes.campuseats.data.remote.ReviewRepository
 import com.uniandes.campuseats.data.remote.SavedRepository
@@ -83,6 +84,7 @@ class AppServices private constructor(val appContext: Context) {
     val profileRepository = ProfileRepository(api)
     val profileSynchronizer = ProfileSynchronizer(localStore, profileRepository)
     val savedRepository = SavedRepository(api)
+    val recentViewsRepository = RecentViewsRepository(api, localStore)
     val restaurantRepository = RestaurantRepository(api, documentCache, policy = cachePolicy, memory = objectMemoryCache)
     val reviewRepository = ReviewRepository(api, documentCache, cachePolicy, objectMemoryCache)
     val catalogRepository = CatalogRepository(api, documentCache, cachePolicy, objectMemoryCache)
