@@ -377,9 +377,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (!services.connectivity.online.value || recentViewsSyncing) return
         recentViewsSyncing = true
         try {
-            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let {
-                recentViews = it.items
-                recentViewsUpdatedAt = it.updatedAt
+            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let { syncedAt ->
+                recentViewsUpdatedAt = syncedAt
             }
             updatePending()
         } finally {
