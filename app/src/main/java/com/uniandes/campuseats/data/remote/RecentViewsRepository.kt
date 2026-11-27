@@ -31,28 +31,33 @@ class RecentViewsRepository(
     suspend fun cached(): RecentViewsSnapshot {
         val doc = store.loadDocument(LocalStore.RECENT_VIEWS_KEY) ?: return RecentViewsSnapshot(emptyList(), null)
         val items = runCatching { decode(JSONArray(doc.payload)) }.getOrDefault(emptyList())
-        return RecentViewsSnapshot(items, doc.fetchedAt)
+        return RecentViewsSnapshot(items, doc.fetchedAt.takeIf { it > 0L })
     }
 
-    suspend fun fetch(pending: List<OutboxEntry>): RecentViewsSnapshot {
+    suspend fun fetch(pending: suspend () -> List<OutboxEntry>): RecentViewsSnapshot {
         val json = api.get("$RECENT_VIEWS_PATH?limit=$FETCH_LIMIT")
         val remote = parseRemote(json.optJSONArray("items") ?: JSONArray())
-        val merged = applyPending(remote, pending)
+        val merged = applyPending(remote, pending().filter { isRecentViewsRequest(it.request) })
         val now = clock()
         save(merged, now)
         return RecentViewsSnapshot(merged, now)
     }
 
-    suspend fun recordView(current: List<RecentView>, restaurantId: String, at: Long): RecentViewsSnapshot {
+    suspend fun recordView(current: List<RecentView>, restaurantId: String, at: Long, updatedAt: Long?): RecentViewsSnapshot {
         val updated = increment(current, restaurantId, at)
-        save(updated, at)
-        return RecentViewsSnapshot(updated, at)
+        save(updated, updatedAt ?: 0L)
+        return RecentViewsSnapshot(updated, updatedAt)
     }
 
-    suspend fun clearLocal(): RecentViewsSnapshot {
-        val now = clock()
-        save(emptyList(), now)
-        return RecentViewsSnapshot(emptyList(), now)
+    suspend fun removeLocal(current: List<RecentView>, restaurantId: String, updatedAt: Long?): RecentViewsSnapshot {
+        val updated = current.filter { it.restaurantId != restaurantId }
+        save(updated, updatedAt ?: 0L)
+        return RecentViewsSnapshot(updated, updatedAt)
+    }
+
+    suspend fun clearLocal(updatedAt: Long?): RecentViewsSnapshot {
+        save(emptyList(), updatedAt ?: 0L)
+        return RecentViewsSnapshot(emptyList(), updatedAt)
     }
 
     fun logRequest(restaurantId: String, at: Long) = OutboxRequest(
@@ -62,13 +67,24 @@ class RecentViewsRepository(
         mapOf("restaurant_id" to restaurantId, "viewed_at" to formatIso(at))
     )
 
+    fun removeRequest(restaurantId: String) =
+        OutboxRequest(OutboxKind.ANALYTICS, "DELETE", "$RECENT_VIEWS_PATH/$restaurantId")
+
     fun clearRequest() = OutboxRequest(OutboxKind.ANALYTICS, "DELETE", RECENT_VIEWS_PATH)
+
+    fun isRecentViewsRequest(request: OutboxRequest): Boolean =
+        request.kind == OutboxKind.ANALYTICS &&
+            (request.path == LOG_VIEW_PATH || request.path == RECENT_VIEWS_PATH || request.path.startsWith("$RECENT_VIEWS_PATH/"))
 
     private fun applyPending(base: List<RecentView>, pending: List<OutboxEntry>): List<RecentView> {
         var result = base
         pending.map { it.request }.forEach { request ->
             when {
                 request.method == "DELETE" && request.path == RECENT_VIEWS_PATH -> result = emptyList()
+                request.method == "DELETE" && request.path.startsWith("$RECENT_VIEWS_PATH/") -> {
+                    val id = request.path.removePrefix("$RECENT_VIEWS_PATH/")
+                    result = result.filter { it.restaurantId != id }
+                }
                 request.method == "POST" && request.path == LOG_VIEW_PATH -> {
                     val body = request.body ?: return@forEach
                     val id = body["restaurant_id"]?.toString() ?: return@forEach
@@ -92,8 +108,8 @@ class RecentViewsRepository(
             .take(FETCH_LIMIT)
     }
 
-    private suspend fun save(items: List<RecentView>, at: Long) {
-        store.saveDocument(LocalStore.RECENT_VIEWS_KEY, encode(items).toString(), at)
+    private suspend fun save(items: List<RecentView>, updatedAt: Long) {
+        store.saveDocument(LocalStore.RECENT_VIEWS_KEY, encode(items).toString(), updatedAt)
     }
 
     private fun parseRemote(array: JSONArray): List<RecentView> = (0 until array.length()).mapNotNull { index ->
