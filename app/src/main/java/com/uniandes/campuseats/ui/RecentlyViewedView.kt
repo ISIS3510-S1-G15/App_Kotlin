@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.uniandes.campuseats.data.Restaurant
 import com.uniandes.campuseats.data.remote.RecentView
+import com.uniandes.campuseats.data.remote.RecentViewsRepository
 import com.uniandes.campuseats.ui.theme.OutfitFontFamily
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -198,7 +199,7 @@ fun RecentlyViewedView(
 
         if (entries.isNotEmpty()) {
             Text(
-                text = "Long-press a place to remove it",
+                text = "Saved on this phone · last ${RecentViewsRepository.MAX_ITEMS} places for ${RecentViewsRepository.MAX_AGE_DAYS} days · Long-press to remove",
                 fontSize = 12.sp,
                 color = HistoryFaint,
                 modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)

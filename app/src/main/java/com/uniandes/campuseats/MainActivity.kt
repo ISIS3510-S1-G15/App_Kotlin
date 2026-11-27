@@ -194,7 +194,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var restaurantsReachable by remember { mutableStateOf(false) }
     var catalogReachable by remember { mutableStateOf(false) }
     var recentSearches by remember { mutableStateOf(emptyList<String>()) }
-    var recentViews by remember { mutableStateOf(emptyList<RecentView>()) }
+    val recentViewsFlow = remember { services.recentViewsRepository.observe() }
+    val recentViews by recentViewsFlow.collectAsStateWithLifecycle(initialValue = emptyList<RecentView>())
     var recentViewsUpdatedAt by remember { mutableStateOf<Long?>(null) }
     var recentViewsPending by remember { mutableIntStateOf(0) }
     var recentViewsSyncing by remember { mutableStateOf(false) }
@@ -376,9 +377,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (!services.connectivity.online.value || recentViewsSyncing) return
         recentViewsSyncing = true
         try {
-            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let {
-                recentViews = it.items
-                recentViewsUpdatedAt = it.updatedAt
+            attemptOrNull { services.recentViewsRepository.fetch { localStore.pending() } }?.let { syncedAt ->
+                recentViewsUpdatedAt = syncedAt
             }
             updatePending()
         } finally {
@@ -561,10 +561,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         savedHome = if (services.preferences.current.value.rememberHomeFilters) services.preferences.loadHomeFilters() else HomeFilterState()
         updatePending()
         recentSearches = localStore.loadRecentSearches()
-        attemptOrNull { services.recentViewsRepository.cached() }?.let {
-            recentViews = it.items
-            recentViewsUpdatedAt = it.updatedAt
-        }
+        attemptOrNull { services.recentViewsRepository.prune() }
+        recentViewsUpdatedAt = attemptOrNull { services.recentViewsRepository.syncedAt() }
         lastSyncTime = services.localStore.loadDocument(LocalStore.LAST_SYNC_KEY)?.fetchedAt
         loadRemote()
     }
@@ -625,31 +623,22 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     fun recordView(restaurantId: String) {
         val now = System.currentTimeMillis()
-        val current = recentViews
         scope.launch {
-            val snapshot = attemptOrNull {
-                services.recentViewsRepository.recordView(current, restaurantId, now, recentViewsUpdatedAt)
-            }
-            if (snapshot != null) {
-                recentViews = snapshot.items
-            }
+            attemptOrNull { services.recentViewsRepository.recordView(restaurantId, now) }
             enqueueAndFlush(services.recentViewsRepository.logRequest(restaurantId, now))
         }
     }
 
     fun removeRecentView(restaurantId: String) {
-        val current = recentViews
-        recentViews = current.filter { it.restaurantId != restaurantId }
         scope.launch {
-            attemptOrNull { services.recentViewsRepository.removeLocal(current, restaurantId, recentViewsUpdatedAt) }
+            attemptOrNull { services.recentViewsRepository.remove(restaurantId) }
             enqueueAndFlush(services.recentViewsRepository.removeRequest(restaurantId))
         }
     }
 
     fun clearRecentViews() {
-        recentViews = emptyList()
         scope.launch {
-            attemptOrNull { services.recentViewsRepository.clearLocal(recentViewsUpdatedAt) }
+            attemptOrNull { services.recentViewsRepository.clear() }
             enqueueAndFlush(services.recentViewsRepository.clearRequest())
         }
     }

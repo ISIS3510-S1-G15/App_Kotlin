@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface AppDao {
@@ -43,6 +44,36 @@ interface AppDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRecentSearches(items: List<RecentSearchEntity>)
+
+    @Query("SELECT * FROM recent_views ORDER BY lastViewedAt DESC")
+    fun observeRecentViews(): Flow<List<RecentViewEntity>>
+
+    @Query("SELECT * FROM recent_views ORDER BY lastViewedAt DESC")
+    suspend fun recentViews(): List<RecentViewEntity>
+
+    @Query("SELECT * FROM recent_views WHERE restaurantId = :restaurantId")
+    suspend fun recentView(restaurantId: String): RecentViewEntity?
+
+    @Query("SELECT COUNT(*) FROM recent_views")
+    suspend fun recentViewCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRecentView(item: RecentViewEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRecentViews(items: List<RecentViewEntity>)
+
+    @Query("DELETE FROM recent_views WHERE restaurantId = :restaurantId")
+    suspend fun deleteRecentView(restaurantId: String)
+
+    @Query("DELETE FROM recent_views")
+    suspend fun clearRecentViews()
+
+    @Query("DELETE FROM recent_views WHERE lastViewedAt < :cutoff")
+    suspend fun deleteRecentViewsOlderThan(cutoff: Long)
+
+    @Query("DELETE FROM recent_views WHERE restaurantId NOT IN (SELECT restaurantId FROM recent_views ORDER BY lastViewedAt DESC LIMIT :keep)")
+    suspend fun trimRecentViews(keep: Int)
 
     @Query("SELECT * FROM profile WHERE id = :id")
     suspend fun profile(id: Int = ProfileEntity.SINGLE_PROFILE_ID): ProfileEntity?

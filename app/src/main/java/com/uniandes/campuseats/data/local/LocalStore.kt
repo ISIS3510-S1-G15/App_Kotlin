@@ -15,6 +15,10 @@ import com.uniandes.campuseats.data.ranking.RankingWindow
 import com.uniandes.campuseats.data.ranking.SnapshotRow
 import com.uniandes.campuseats.data.ranking.StoredRanking
 import com.uniandes.campuseats.data.remote.ProfileLocalSource
+import com.uniandes.campuseats.data.remote.RecentView
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import org.json.JSONArray
 import com.uniandes.campuseats.data.remote.StoredProfile
 
 class LocalStore(
@@ -90,6 +94,7 @@ class LocalStore(
             dao.clearSaved()
             dao.clearOutbox()
             dao.clearRecentSearches()
+            dao.clearRecentViews()
             dao.deleteDocument(LAST_SYNC_KEY)
             dao.deleteDocument(DATA_OWNER_KEY)
             dao.deleteDocument(RECENT_VIEWS_KEY)
@@ -190,8 +195,70 @@ class LocalStore(
         const val DATA_OWNER_KEY = "data_owner"
         const val LAST_SYNC_KEY = "last_sync"
         const val RECENT_VIEWS_KEY = "recent_views"
+        private const val RECENT_VIEWS_SYNC_MARKER = "synced"
         const val CURRENT_RANKING = 0
         const val PREVIOUS_RANKING = 1
+    }
+
+    fun observeRecentViews(): Flow<List<RecentView>> =
+        dao.observeRecentViews().map { rows -> rows.map { it.toRecentView() } }
+
+    suspend fun loadRecentViews(): List<RecentView> = dao.recentViews().map { it.toRecentView() }
+
+    suspend fun recentViewsSyncedAt(): Long? =
+        dao.document(RECENT_VIEWS_KEY)?.fetchedAt?.takeIf { it > 0L }
+
+    suspend fun recordRecentView(restaurantId: String, at: Long, maxItems: Int, maxAgeMs: Long) {
+        database.withTransaction {
+            val existing = dao.recentView(restaurantId)
+            dao.upsertRecentView(
+                RecentViewEntity(
+                    restaurantId = restaurantId,
+                    viewCount = (existing?.viewCount ?: 0) + 1,
+                    lastViewedAt = maxOf(existing?.lastViewedAt ?: 0L, at)
+                )
+            )
+            pruneRecentViews(maxItems, maxAgeMs)
+        }
+    }
+
+    suspend fun removeRecentView(restaurantId: String) {
+        dao.deleteRecentView(restaurantId)
+    }
+
+    suspend fun clearRecentViews() {
+        dao.clearRecentViews()
+    }
+
+    suspend fun replaceRecentViews(items: List<RecentView>, syncedAt: Long, maxItems: Int, maxAgeMs: Long) {
+        database.withTransaction {
+            dao.clearRecentViews()
+            dao.insertRecentViews(items.map { RecentViewEntity(it.restaurantId, it.viewCount, it.lastViewedAt) })
+            pruneRecentViews(maxItems, maxAgeMs)
+            dao.upsertDocument(CacheDocumentEntity(RECENT_VIEWS_KEY, RECENT_VIEWS_SYNC_MARKER, syncedAt))
+        }
+    }
+
+    suspend fun pruneRecentViews(maxItems: Int, maxAgeMs: Long) {
+        dao.deleteRecentViewsOlderThan(clock() - maxAgeMs)
+        dao.trimRecentViews(maxItems)
+    }
+
+    suspend fun migrateLegacyRecentViews() {
+        val legacy = dao.document(RECENT_VIEWS_KEY) ?: return
+        if (!legacy.payload.trimStart().startsWith("[")) return
+        val items = runCatching {
+            val array = JSONArray(legacy.payload)
+            (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val id = item.optString("restaurant_id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                RecentViewEntity(id, item.optInt("view_count", 1), item.optLong("last_viewed_at"))
+            }
+        }.getOrDefault(emptyList())
+        database.withTransaction {
+            if (dao.recentViewCount() == 0) dao.insertRecentViews(items)
+            dao.upsertDocument(CacheDocumentEntity(RECENT_VIEWS_KEY, RECENT_VIEWS_SYNC_MARKER, legacy.fetchedAt))
+        }
     }
 
     suspend fun loadDocument(key: String): CacheDocumentEntity? = dao.document(key)
@@ -250,3 +317,5 @@ private fun ProfileEntity.toProfile() = Profile(
     topPriorities = StringListCodec.decode(topPriorities),
     foodsToAvoid = StringListCodec.decode(foodsToAvoid)
 )
+
+private fun RecentViewEntity.toRecentView() = RecentView(restaurantId, viewCount, lastViewedAt)
