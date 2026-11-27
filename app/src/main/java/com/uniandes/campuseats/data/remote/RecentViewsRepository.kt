@@ -9,12 +9,15 @@ import com.uniandes.campuseats.data.outbox.OutboxEntry
 import com.uniandes.campuseats.data.outbox.OutboxKind
 import com.uniandes.campuseats.data.outbox.OutboxRequest
 import com.uniandes.campuseats.net.RemoteApi
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -34,9 +37,11 @@ class RecentViewsRepository(
     private val api: RemoteApi,
     private val store: LocalStore,
     private val policy: CachePolicy = CachePolicy(),
-    private val clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val computation: CoroutineDispatcher = Dispatchers.Default
 ) {
     private val migrationLock = Mutex()
+    private val writeLock = Mutex()
     private var migrated = false
     private val syncCache = MemoryCache<String, Long>(maxEntries = 1)
 
@@ -78,24 +83,36 @@ class RecentViewsRepository(
     suspend fun fetch(pending: suspend () -> List<OutboxEntry>): Long {
         prepare()
         val json = api.get("$RECENT_VIEWS_PATH?limit=$MAX_ITEMS")
-        val remote = parseRemote(json.optJSONArray("items") ?: JSONArray())
-        val merged = applyPending(remote, pending().filter { isRecentViewsRequest(it.request) })
-        val now = clock()
-        store.replaceRecentViews(merged, now, MAX_ITEMS, MAX_AGE_MS)
-        return now
+        val remote = withContext(computation) { parseRemote(json.optJSONArray("items") ?: JSONArray()) }
+        return writeLock.withLock {
+            val queued = pending()
+            val merged = withContext(computation) { applyPending(remote, queued.filter { isRecentViewsRequest(it.request) }) }
+            val now = clock()
+            store.replaceRecentViews(merged, now, MAX_ITEMS, MAX_AGE_MS)
+            now
+        }
     }
 
-    suspend fun recordView(restaurantId: String, at: Long) {
+    suspend fun recordView(restaurantId: String, at: Long, enqueue: suspend (OutboxRequest) -> Unit) {
         prepare()
-        store.recordRecentView(restaurantId, at, MAX_ITEMS, MAX_AGE_MS)
+        writeLock.withLock {
+            store.recordRecentView(restaurantId, at, MAX_ITEMS, MAX_AGE_MS)
+            enqueue(logRequest(restaurantId, at))
+        }
     }
 
-    suspend fun remove(restaurantId: String) {
-        store.removeRecentView(restaurantId)
+    suspend fun remove(restaurantId: String, enqueue: suspend (OutboxRequest) -> Unit) {
+        writeLock.withLock {
+            store.removeRecentView(restaurantId)
+            enqueue(removeRequest(restaurantId))
+        }
     }
 
-    suspend fun clear() {
-        store.clearRecentViews()
+    suspend fun clear(enqueue: suspend (OutboxRequest) -> Unit) {
+        writeLock.withLock {
+            store.clearRecentViews()
+            enqueue(clearRequest())
+        }
     }
 
     suspend fun prune() {

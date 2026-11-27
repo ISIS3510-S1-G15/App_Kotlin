@@ -91,7 +91,10 @@ import com.uniandes.campuseats.ui.PartnerReportView
 import com.uniandes.campuseats.ui.RankingView
 import com.uniandes.campuseats.ui.MyReviewsView
 import com.uniandes.campuseats.ui.RecentlyViewedView
-import com.uniandes.campuseats.ui.resolveRecentlyViewed
+import com.uniandes.campuseats.ui.RecentlyViewedPresenter
+import com.uniandes.campuseats.ui.RecentlyViewedUi
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.uniandes.campuseats.data.remote.RecentView
 import com.uniandes.campuseats.data.remote.RecentViewsSource
 import com.uniandes.campuseats.ranking.RankingViewModel
@@ -198,6 +201,15 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     var recentSearches by remember { mutableStateOf(emptyList<String>()) }
     val recentViewsFlow = remember { services.recentViewsRepository.observe() }
     val recentViews by recentViewsFlow.collectAsStateWithLifecycle(initialValue = emptyList<RecentView>())
+    val recentlyViewedUi by produceState(RecentlyViewedUi.Empty, recentViews, restaurants) {
+        while (true) {
+            value = RecentlyViewedPresenter.build(recentViews, restaurants)
+            delay(60_000L)
+        }
+    }
+    val recentImageUrls = remember(recentlyViewedUi.entries) {
+        recentlyViewedUi.entries.mapNotNull { it.restaurant.image as? String }.distinct()
+    }
     var recentViewsUpdatedAt by remember { mutableStateOf<Long?>(null) }
     var recentViewsPending by remember { mutableIntStateOf(0) }
     var recentViewsSyncing by remember { mutableStateOf(false) }
@@ -421,6 +433,11 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         }
     }
 
+    suspend fun afterLocalChange() {
+        updatePending()
+        if (services.connectivity.online.value) flushOutbox() else services.syncScheduler.scheduleOutboxSync()
+    }
+
     suspend fun enqueueAndFlush(request: OutboxRequest) {
         services.outboxStore.enqueue(request)
         updatePending()
@@ -628,22 +645,22 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     fun recordView(restaurantId: String) {
         val now = System.currentTimeMillis()
         scope.launch {
-            attemptOrNull { services.recentViewsRepository.recordView(restaurantId, now) }
-            enqueueAndFlush(services.recentViewsRepository.logRequest(restaurantId, now))
+            attemptOrNull { services.recentViewsRepository.recordView(restaurantId, now) { services.outboxStore.enqueue(it) } }
+            afterLocalChange()
         }
     }
 
     fun removeRecentView(restaurantId: String) {
         scope.launch {
-            attemptOrNull { services.recentViewsRepository.remove(restaurantId) }
-            enqueueAndFlush(services.recentViewsRepository.removeRequest(restaurantId))
+            attemptOrNull { services.recentViewsRepository.remove(restaurantId) { services.outboxStore.enqueue(it) } }
+            afterLocalChange()
         }
     }
 
     fun clearRecentViews() {
         scope.launch {
-            attemptOrNull { services.recentViewsRepository.clear() }
-            enqueueAndFlush(services.recentViewsRepository.clearRequest())
+            attemptOrNull { services.recentViewsRepository.clear { services.outboxStore.enqueue(it) } }
+            afterLocalChange()
         }
     }
 
@@ -706,6 +723,13 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     SectionVisibilityEffect(AppSection.Map, mapVisible, sections)
     SectionVisibilityEffect(AppSection.Favorites, favoritesVisible, sections)
     SectionVisibilityEffect(AppSection.Details, detailsVisible, sections)
+    LaunchedEffect(recentImageUrls, online, prefs.dataSaver) {
+        if (!online || prefs.dataSaver || recentImageUrls.isEmpty()) return@LaunchedEffect
+        RecentlyViewedPresenter.forEachConcurrently(recentImageUrls) { url ->
+            attemptOrNull { context.imageLoader.execute(ImageRequest.Builder(context).data(url).build()) }
+        }
+    }
+
     LaunchedEffect(favoritesVisible) {
         if (favoritesVisible) refreshRecentViews()
     }
@@ -919,7 +943,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                     overlay == Overlay.RecentlyViewed -> {
                         LaunchedEffect(Unit) { refreshRecentViews() }
                         RecentlyViewedView(
-                            entries = resolveRecentlyViewed(recentViews, restaurants),
+                            state = recentlyViewedUi,
                             updatedAt = recentViewsUpdatedAt,
                             isOnline = online,
                             pendingChanges = recentViewsPending,
@@ -1044,7 +1068,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             crowding = crowding,
                             savedIds = savedIds,
                             userLocation = userLocation.location,
-                            recentlyViewed = resolveRecentlyViewed(recentViews, restaurants),
+                            recentlyViewed = recentlyViewedUi.entries,
                             onSeeAllRecent = { overlayStack.add(Overlay.RecentlyViewed) }
                         )
                         PROFILE_TAB -> ProfileView(
