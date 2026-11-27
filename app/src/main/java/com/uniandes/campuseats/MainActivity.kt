@@ -1029,6 +1029,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                         PROFILE_TAB -> ProfileView(
                             profile = profile,
                             userEmail = user.email,
+                            showSettings = user.isAnalyticsAdmin,
                             showLogoutWarning = auth.showLogoutWarning.collectAsStateWithLifecycle().value,
                             onRetakeSurvey = { overlayStack.add(Overlay.Survey) },
                             onOpenSettings = { overlayStack.add(Overlay.Settings) },
