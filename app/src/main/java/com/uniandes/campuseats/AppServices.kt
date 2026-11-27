@@ -26,7 +26,6 @@ import com.uniandes.campuseats.data.ranking.RankingCache
 import com.uniandes.campuseats.data.ranking.RankingRepository
 import com.uniandes.campuseats.data.remote.CatalogRepository
 import com.uniandes.campuseats.data.remote.OccupancyRepository
-import com.uniandes.campuseats.data.remote.PartnerReportRepository
 import com.uniandes.campuseats.data.remote.ProfileRepository
 import com.uniandes.campuseats.data.remote.ProfileSynchronizer
 import com.uniandes.campuseats.data.remote.RecentViewsRepository
@@ -89,7 +88,6 @@ class AppServices private constructor(val appContext: Context) {
     val reviewRepository = ReviewRepository(api, documentCache, cachePolicy, objectMemoryCache)
     val catalogRepository = CatalogRepository(api, documentCache, cachePolicy, objectMemoryCache)
     val occupancyRepository = OccupancyRepository(api, documentCache, cachePolicy)
-    val partnerReportRepository = PartnerReportRepository(api, documentCache, cachePolicy)
     val rankingCache = RankingCache()
     val rankingRepository = RankingRepository(restaurantRepository, reviewRepository, occupancyRepository, localStore, rankingCache, cachePolicy)
     val analyticsTransport: AnalyticsTransport = HttpAnalyticsTransport(api)

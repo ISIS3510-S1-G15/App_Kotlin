@@ -57,6 +57,11 @@ private val HistoryOpen = Color(0xFF1E9E2F)
 private val HistoryClosed = Color(0xFFA39A90)
 private val HistoryAccent = Color(0xFFE8440A)
 private val HistoryBanner = Color(0xFF1F1915)
+private val CardShape = RoundedCornerShape(20.dp)
+private val ThumbShape = RoundedCornerShape(14.dp)
+private val BannerShape = RoundedCornerShape(16.dp)
+private val LinkShape = RoundedCornerShape(6.dp)
+private val ThumbSize = 96.dp
 
 @Composable
 fun RecentlyViewedView(
@@ -75,7 +80,7 @@ fun RecentlyViewedView(
     val entries = state.entries
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var removeCandidateId by rememberSaveable { mutableStateOf<String?>(null) }
-    val removeCandidate = entries.firstOrNull { it.restaurant.id == removeCandidateId }?.restaurant
+    val removeCandidate = removeCandidateId?.let { state.byId[it]?.restaurant }
 
     Column(
         modifier = Modifier
@@ -146,7 +151,7 @@ fun RecentlyViewedView(
                     color = if (isSyncing) HistoryFaint else HistoryAccent,
                     modifier = Modifier
                         .padding(start = 8.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(LinkShape)
                         .clickable(enabled = !isSyncing, onClick = onRefresh)
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                 )
@@ -183,7 +188,7 @@ fun RecentlyViewedView(
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(state.rows, key = { it.key }) { row ->
+                items(state.rows, key = { it.key }, contentType = { it.contentType }) { row ->
                     when (row) {
                         is RecentlyViewedRow.Header -> Text(
                             text = row.label,
@@ -282,7 +287,7 @@ private fun OfflineHistoryBanner() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(BannerShape)
             .background(HistoryBanner)
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -306,11 +311,10 @@ private fun HistoryCard(
     onLongPress: (Restaurant) -> Unit
 ) {
     val r = entry.restaurant
-    val shape = RoundedCornerShape(20.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
+            .clip(CardShape)
             .background(Color.White)
             .combinedClickable(
                 onClick = { onSelect(r) },
@@ -323,9 +327,10 @@ private fun HistoryCard(
             model = r.image,
             contentDescription = r.name,
             contentScale = ContentScale.Crop,
+            thumbnailSize = ThumbSize,
             modifier = Modifier
-                .size(96.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .size(ThumbSize)
+                .clip(ThumbShape)
         )
         Spacer(Modifier.width(18.dp))
         Column(modifier = Modifier.weight(1f)) {
