@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -549,11 +550,13 @@ private fun FeaturedRestaurant(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.Start),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(
+                    modifier = Modifier.align(Alignment.CenterVertically),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -572,22 +575,42 @@ private fun FeaturedRestaurant(
                 }
 
                 Text(
-                    text = if (distanceMeters != null) {
-                        "${restaurant.location} · ${formatDistance(distanceMeters)}"
-                    } else {
-                        restaurant.location
-                    },
-                    color = Color.White.copy(alpha = 0.70f),
+                    text = restaurant.location,
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                    color = Color.White.copy(alpha = 0.75f),
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Text(
-                    text = "• ${restaurant.waitTime}",
-                    color = Color.White.copy(alpha = 0.70f),
-                    fontSize = 12.sp
-                )
+                if (distanceMeters != null) {
+                    Text(
+                        text = formatDistance(distanceMeters),
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 12.sp,
+                        maxLines = 1
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccessTime,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.75f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = restaurant.waitTime,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 12.sp,
+                        maxLines = 1
+                    )
+                }
             }
 
             if (reasons.isNotEmpty()) {
