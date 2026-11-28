@@ -17,6 +17,11 @@ android {
         version = release(37)
     }
 
+    androidResources {
+        // Conserva solo traducciones en ingles y español de las librerías
+        localeFilters += listOf("en", "es")
+    }
+
     defaultConfig {
         applicationId = "com.uniandes.campuseats"
         minSdk = 24
@@ -32,11 +37,25 @@ android {
 
     buildTypes {
         release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             firebaseAppDistribution {
                 // Se configura por propiedades de Gradle (-PdistributionTesters=a@x.com,b@y.com) para no dejar datos de ejemplo
                 (project.findProperty("distributionTesters") as String?)?.let { testers = it }
                 (project.findProperty("distributionReleaseNotes") as String?)?.let { releaseNotes = it }
             }
+        }
+    }
+
+    packaging {
+        resources {
+            // Elimina metadatos de depuracion de coroutines del APK de release
+            excludes += "DebugProbesKt.bin"
         }
     }
 

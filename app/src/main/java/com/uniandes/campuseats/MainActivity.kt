@@ -68,7 +68,6 @@ import com.uniandes.campuseats.net.attemptOrNull
 import com.uniandes.campuseats.sensor.distanceMeters
 import com.uniandes.campuseats.sensor.rememberUserLocation
 import com.uniandes.campuseats.ui.ConnectionErrorView
-import com.uniandes.campuseats.ui.CrowdingModal
 import com.uniandes.campuseats.ui.DetailView
 import com.uniandes.campuseats.ui.HomeFilters
 import com.uniandes.campuseats.ui.HomeView
@@ -184,7 +183,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
     ) { mutableStateListOf<Overlay>() }
     val overlay = overlayStack.lastOrNull()
     var selectedRestaurantId by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingRestaurant by remember { mutableStateOf<Restaurant?>(null) }
 
     val reviews = remember { mutableStateListOf<Review>() }
     var myReviews by remember { mutableStateOf<List<Review>>(emptyList()) }
@@ -636,11 +634,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         return
     }
 
-    // Tocar un restaurante → primero el modal de ocupación, luego el detalle
-    val requestDetail: (Restaurant) -> Unit = {
-        pendingRestaurant = it
-    }
-
     fun recordView(restaurantId: String) {
         val now = System.currentTimeMillis()
         scope.launch {
@@ -667,9 +660,27 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         recordView(r.id)
         analytics.onOccupancyChecked(r.id, crowding[r.id].orEmpty().isNotEmpty())
         selectedRestaurantId = r.id
-        pendingRestaurant = null
         overlayStack.clear()
         overlayStack.add(Overlay.Detail)
+    }
+
+    val requestDetail: (Restaurant) -> Unit = { commitDetail(it) }
+
+    fun reportCrowding(restaurantId: String, level: Int) {
+        scope.launch {
+            crowding[restaurantId] = crowding[restaurantId].orEmpty() + level
+            attemptOrNull { localStore.saveCrowding(crowding.toMap()) }
+            if (!services.connectivity.online.value) {
+                Toast.makeText(
+                    context,
+                    "You're offline. Your crowding report will sync when you reconnect.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(context, "Crowding level reported", Toast.LENGTH_SHORT).show()
+            }
+            enqueueAndFlush(services.occupancyRepository.reportRequest(restaurantId, level))
+        }
     }
 
     fun toggleSaved(id: String) {
@@ -712,7 +723,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
 
     fun selectTab(tab: Int) {
         overlayStack.clear()
-        pendingRestaurant = null
         currentTab = tab
     }
 
@@ -733,9 +743,8 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
         if (favoritesVisible) refreshRecentViews()
     }
 
-    BackHandler(enabled = pendingRestaurant != null || overlayStack.isNotEmpty() || currentTab != 0) {
+    BackHandler(enabled = overlayStack.isNotEmpty() || currentTab != 0) {
         when {
-            pendingRestaurant != null -> pendingRestaurant = null
             overlay == Overlay.Detail -> backFromDetail()
             overlayStack.isNotEmpty() -> popOverlay()
             else -> currentTab = 0 // Back desde otra pestana vuelve a Discover en vez de cerrar la app
@@ -837,6 +846,7 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             overlayStack.add(Overlay.ReviewsList)
                         },
                         isOnline = online,
+                        onReportCrowding = { level -> reportCrowding(restaurant.id, level) },
                         onGetDirections = { tags ->
                             sections.onInteraction(AppSection.Details, SectionAction.DirectionsOpened)
                             analytics.onGoDecision(restaurant.id)
@@ -1074,24 +1084,6 @@ private fun CampusEatsApp(services: AppServices, user: AuthUser, auth: AuthViewM
                             onLogoutConfirm = { auth.confirmLogout() },
                             onLogoutCancel = { auth.cancelLogout() },
                             onBack = { selectTab(0) }
-                        )
-                    }
-                }
-
-                // Modal de ocupación: flota sobre la tab antes de abrir el detalle
-                pendingRestaurant?.let { pending ->
-                    if (overlay == null) {
-                        CrowdingModal(
-                            restaurant = pending,
-                            onSubmit = { level ->
-                                scope.launch {
-                                    crowding[pending.id] = crowding[pending.id].orEmpty() + level
-                                    attemptOrNull { localStore.saveCrowding(crowding.toMap()) }
-                                    enqueueAndFlush(services.occupancyRepository.reportRequest(pending.id, level))
-                                }
-                                commitDetail(pending)
-                            },
-                            onSkip = { commitDetail(pending) }
                         )
                     }
                 }

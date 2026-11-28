@@ -31,8 +31,13 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -82,7 +87,6 @@ private val Gold = Color(0xFFF4A735)
 private val Green = Color(0xFF3A8C4F)
 private val BarOff = Color(0xFFD4CAC0)
 
-@OptIn(ExperimentalLayoutApi::class)
 private const val FRAMED_WITH_USER = "framed_with_user"
 private const val FRAMED_RESTAURANT_ONLY = "framed_restaurant_only"
 
@@ -99,11 +103,13 @@ fun DetailView(
     onWriteReview: () -> Unit,
     onSeeReviews: () -> Unit,
     onGetDirections: (tags: List<String>) -> Unit,
-    isOnline: Boolean = true
+    isOnline: Boolean = true,
+    onReportCrowding: (Int) -> Unit = {}
 ) {
     val r = restaurant
     val context = LocalContext.current
     var activeMenu by remember(r.id) { mutableIntStateOf(0) }
+    var showCrowdingDialog by remember(r.id) { mutableStateOf(false) }
 
     val reviewAvg = if (reviews.isNotEmpty()) {
         String.format(Locale.US, "%.1f", reviews.map { it.ratings.overall }.average())
@@ -458,6 +464,60 @@ fun DetailView(
                         )
                     }
                 }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Cream)
+                        .border(1.dp, Outline, RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Info,
+                        contentDescription = null,
+                        tint = Muted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "No crowding reports yet. Be the first to help other students!",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+
+            // Boton para reportar ocupacion manualmente
+            Row(
+                modifier = Modifier
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp)
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Orange.copy(alpha = 0.12f))
+                    .border(1.dp, Orange.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                    .clickable { showCrowdingDialog = true },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Groups,
+                    contentDescription = null,
+                    tint = Orange,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Report crowding level",
+                    color = Orange,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = OutfitFontFamily
+                )
             }
 
             // Description
@@ -613,6 +673,16 @@ fun DetailView(
             }
         }
     }
+    if (showCrowdingDialog) {
+        CrowdingReportDialog(
+            restaurantName = r.name,
+            onSelectLevel = { level ->
+                showCrowdingDialog = false
+                onReportCrowding(level)
+            },
+            onDismiss = { showCrowdingDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -654,5 +724,83 @@ private fun StatDivider() {
             .width(1.dp)
             .height(32.dp)
             .background(Line)
+    )
+}
+
+@Composable
+private fun CrowdingReportDialog(
+    restaurantName: String,
+    onSelectLevel: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(
+        Triple(1, "Not Crowded", getCrowdingLevel(1.0)),
+        Triple(3, "Moderate", getCrowdingLevel(3.0)),
+        Triple(5, "Crowded", getCrowdingLevel(5.0))
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Cream,
+        shape = RoundedCornerShape(24.dp),
+        title = {
+            Text(
+                text = "Are you at $restaurantName?",
+                color = Ink,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = OutfitFontFamily
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Help other students by reporting how busy it is now",
+                    color = Muted,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                options.forEach { (value, label, levelStyle) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White)
+                            .border(1.dp, Outline, RoundedCornerShape(14.dp))
+                            .clickable { onSelectLevel(value) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CrowdingBars(
+                            value = value,
+                            activeColor = levelStyle.barColor,
+                            inactiveColor = Outline,
+                            barWidth = 4f,
+                            baseHeight = 7f,
+                            step = 3f,
+                            gap = 2f
+                        )
+                        Text(
+                            text = label,
+                            color = Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = "Cancel",
+                    color = Muted,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     )
 }
